@@ -64,10 +64,23 @@ async def main():
         # Keep running
         await asyncio.Event().wait()
     else:
-        # Polling Mode
+        # Polling Mode with background HTTP health-check for Render Free Web Service
+        async def handle_health_check(request):
+            return web.Response(text="ASOX Market Telegram Bot is running OK!")
+
+        app = web.Application()
+        app.router.add_get('/', handle_health_check)
+        app.router.add_get('/health', handle_health_check)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
+        await site.start()
+        logging.info(f"🚀 Health check HTTP server running on port {PORT}...")
+
         logging.info("🚀 ASOX Market Telegram Bot started in Polling mode...")
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     try:
