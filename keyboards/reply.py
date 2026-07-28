@@ -4,7 +4,7 @@ def get_main_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="🛍 Mahsulotlar Katalogi"), KeyboardButton(text="🛒 Savat")],
         [KeyboardButton(text="📦 Buyurtmalarim"), KeyboardButton(text="👤 Profilim")],
-        [KeyboardButton(text="📞 Biz bilan aloqa"), KeyboardButton(text="🔍 Qidiruv")]
+        [KeyboardButton(text="📞 Biz bilan bog'lanish"), KeyboardButton(text="🔍 Qidiruv")]
     ]
     if is_admin:
         buttons.append([KeyboardButton(text="⚙️ Admin Panel")])

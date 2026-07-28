@@ -53,7 +53,7 @@ async def process_profile(message: Message):
     )
     await message.answer(profile_text, parse_mode="HTML")
 
-@router.message(F.text == "📞 Biz bilan aloqa")
+@router.message(F.text.in_(["📞 Biz bilan bog'lanish", "📞 Biz bilan aloqa", "Biz bilan bog'lanish", "Biz bilan aloqa"]))
 async def process_contact(message: Message):
     contact_text = (
         f"📞 <b>ASOX Market Qo'llab-quvvatlash Xizmati</b>\n\n"
