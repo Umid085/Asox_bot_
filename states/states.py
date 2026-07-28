@@ -1,0 +1,15 @@
+from aiogram.fsm.state import State, StatesGroup
+
+class CheckoutStates(StatesGroup):
+    waiting_for_phone = State()
+    waiting_for_location = State()
+    waiting_for_payment = State()
+
+class AdminStates(StatesGroup):
+    waiting_for_product_name = State()
+    waiting_for_product_category = State()
+    waiting_for_product_price = State()
+    waiting_for_product_description = State()
+    waiting_for_product_image = State()
+    waiting_for_broadcast_text = State()
+    waiting_for_search_query = State()
