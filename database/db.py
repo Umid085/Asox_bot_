@@ -1,77 +1,92 @@
+import os
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-# In-memory Async Store initialized with rich sample data matching ASOX Market products
+# Optional Firebase Firestore integration
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    if not firebase_admin._apps:
+        cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT", "")
+        if cred_path and os.path.exists(cred_path):
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred, {"projectId": "asox-market-prod-2e4bb"})
+        else:
+            firebase_admin.initialize_app(options={"projectId": "asox-market-prod-2e4bb"})
+    _db_client = firestore.client()
+except Exception as _e:
+    _db_client = None
 
+# ASOX Market Category presets
 CATEGORIES = [
-    {"id": "cat_phones", "name": "📱 Smartfonlar va Gadjetlar", "icon": "📱"},
-    {"id": "cat_laptops", "name": "💻 Noutbuklar va Kompyuterlar", "icon": "💻"},
-    {"id": "cat_audio", "name": "🎧 Maishiy audio va Quloqchinlar", "icon": "🎧"},
-    {"id": "cat_home", "name": "🏠 Maishiy texnika", "icon": "🏠"},
-    {"id": "cat_accessories", "name": "🔌 Aksessuarlar", "icon": "🔌"},
+    {"id": "cat_merch", "name": "👕 Kiyimlar & Merch (Futbolka, Kepka, Panama)", "icon": "👕"},
+    {"id": "cat_poligraphy", "name": "📇 Vizitkalar & Kichik Poligrafiya", "icon": "📇"},
+    {"id": "cat_large_format", "name": "🖼️ Keng formatli bosma (Banner, Roll-up)", "icon": "🖼️"},
+    {"id": "cat_souvenirs", "name": "☕ Suvenirlar (Krujka, Stiker, Ruchka)", "icon": "☕"},
+    {"id": "cat_packaging", "name": "📦 Qadoqlash & Sumkalar", "icon": "📦"},
 ]
 
 SAMPLE_PRODUCTS = [
     {
-        "id": "prod_1",
-        "category_id": "cat_phones",
-        "name": "iPhone 15 Pro Max 256GB Natural Titanium",
-        "description": "A17 Pro chip, Titandan ishlangan korpus, 48MP kamera, 120Hz Super Retina XDR ekran.",
-        "price": 14500000,
-        "image_url": "https://images.unsplash.com/photo-1695048133142-1a20484d2569?q=80&w=800",
+        "id": "prod_kepka",
+        "category_id": "cat_merch",
+        "name": "Kepka ASOX Premium (Bosma bilan)",
+        "description": "100% paxta, metall fiksator, yuqori sifatli DTF yoki kashta bosma.",
+        "price": 85000,
+        "image_url": "https://asox.uz/icons/icon-512x512.png",
         "in_stock": True,
         "rating": 4.9
     },
     {
-        "id": "prod_2",
-        "category_id": "cat_phones",
-        "name": "Samsung Galaxy S24 Ultra 512GB",
-        "description": "Galaxy AI funksiyalari, Snapdragon 8 Gen 3, 200MP kamera va o'rnatilgan S-Pen.",
-        "price": 13800000,
-        "image_url": "https://images.unsplash.com/photo-1610945265064-0e34e5519bbf?q=80&w=800",
+        "id": "prod_panama",
+        "category_id": "cat_merch",
+        "name": "Panama ASOX Yozgi Merch",
+        "description": "Qulay va zamonaviy yozgi bosh kiyim, brending uchun tayyor.",
+        "price": 95000,
+        "image_url": "https://asox.uz/icons/icon-512x512.png",
         "in_stock": True,
         "rating": 4.8
     },
     {
-        "id": "prod_3",
-        "category_id": "cat_laptops",
-        "name": "MacBook Pro 14 M3 Pro 18GB/512GB",
-        "description": "M3 Pro chipi, Liquid Retina XDR displey, 18 soatgacha batareya ishlash vaqti.",
-        "price": 24000000,
-        "image_url": "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=800",
+        "id": "prod_futbolka",
+        "category_id": "cat_merch",
+        "name": "Futbolka Oversize Premium",
+        "description": "Kompakt penye paxta 240g, yuvilganda o'chmaydigan bosma.",
+        "price": 120000,
+        "image_url": "https://asox.uz/icons/icon-512x512.png",
         "in_stock": True,
         "rating": 5.0
     },
     {
-        "id": "prod_4",
-        "category_id": "cat_audio",
-        "name": "AirPods Pro (2-avlod) Type-C",
-        "description": "Faol shovqinni bekor qilish (ANC), Shaffoflik rejimi, MagSafe qutisi.",
-        "price": 2800000,
-        "image_url": "https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?q=80&w=800",
+        "id": "prod_vizitka",
+        "category_id": "cat_poligraphy",
+        "name": "Vizitkalar to'plami (100 dona)",
+        "description": "350g bo'rli qog'oz, ikki tomonlama to'liq rangli bosma + mot laminatsiya.",
+        "price": 60000,
+        "image_url": "https://asox.uz/icons/icon-512x512.png",
         "in_stock": True,
         "rating": 4.9
     },
     {
-        "id": "prod_5",
-        "category_id": "cat_home",
-        "name": "Dyson V15 Detect Absolute changyutgich",
-        "description": "Lazerli chang aniqlash tizimi, 240 AW kuchli tortish, HEPA filtratsiyasi.",
-        "price": 9200000,
-        "image_url": "https://images.unsplash.com/photo-1558317374-067fb5f30001?q=80&w=800",
-        "in_stock": True,
-        "rating": 4.7
-    },
-    {
-        "id": "prod_6",
-        "category_id": "cat_accessories",
-        "name": "Anker PowerBank 24000mAh 140W",
-        "description": "Noutbuk va telefonlar uchun o'ta tezkor quvvatlash moslamasi, OLED displey.",
-        "price": 1400000,
-        "image_url": "https://images.unsplash.com/photo-1609592424074-9844208a0d78?q=80&w=800",
+        "id": "prod_banner",
+        "category_id": "cat_large_format",
+        "name": "Banner bosish (Frontlit 440g, 1 m²)",
+        "description": "Tashqi reklama uchun yomg'ir va quyoshga chidamli banner bosma.",
+        "price": 35000,
+        "image_url": "https://asox.uz/icons/icon-512x512.png",
         "in_stock": True,
         "rating": 4.8
+    },
+    {
+        "id": "prod_krujka",
+        "category_id": "cat_souvenirs",
+        "name": "Logotipli Keramika Krujka (330ml)",
+        "description": "Sublimatsion sifatli bosma, idish yuvish mashinasiga chidamli.",
+        "price": 45000,
+        "image_url": "https://asox.uz/icons/icon-512x512.png",
+        "in_stock": True,
+        "rating": 4.9
     }
 ]
 
@@ -85,18 +100,64 @@ class Database:
         self._lock = asyncio.Lock()
 
     async def get_categories(self) -> List[Dict[str, Any]]:
+        if _db_client:
+            try:
+                cats = []
+                docs = _db_client.collection("categories").where("isActive", "==", True).stream()
+                for d in docs:
+                    data = d.to_dict()
+                    data["id"] = d.id
+                    cats.append(data)
+                if cats:
+                    return cats
+            except Exception:
+                pass
         return self._categories
 
     async def get_category_by_id(self, cat_id: str) -> Optional[Dict[str, Any]]:
-        for cat in self._categories:
+        categories = await self.get_categories()
+        for cat in categories:
             if cat["id"] == cat_id:
                 return cat
         return None
 
     async def get_products_by_category(self, cat_id: str) -> List[Dict[str, Any]]:
+        if _db_client:
+            try:
+                products = []
+                docs = _db_client.collection("products").where("isActive", "==", True).limit(50).stream()
+                for d in docs:
+                    data = d.to_dict()
+                    if data.get("isDeleted") is True:
+                        continue
+                    cat = (data.get("category") or "").lower()
+                    cat_id_clean = cat_id.lower().replace("cat_", "")
+                    if cat_id_clean in cat or cat_id == data.get("category"):
+                        data["id"] = d.id
+                        data["price"] = data.get("effectivePrice") or data.get("price") or 0
+                        data["category_id"] = cat_id
+                        data["in_stock"] = True
+                        data["image_url"] = (data.get("images") or [None])[0] or "https://asox.uz/icons/icon-512x512.png"
+                        products.append(data)
+                if products:
+                    return products
+            except Exception:
+                pass
         return [p for p in self._products if p["category_id"] == cat_id]
 
     async def get_product_by_id(self, product_id: str) -> Optional[Dict[str, Any]]:
+        if _db_client:
+            try:
+                doc = _db_client.collection("products").document(product_id).get()
+                if doc.exists:
+                    data = doc.to_dict()
+                    data["id"] = doc.id
+                    data["price"] = data.get("effectivePrice") or data.get("price") or 0
+                    data["in_stock"] = True
+                    data["image_url"] = (data.get("images") or [None])[0] or "https://asox.uz/icons/icon-512x512.png"
+                    return data
+            except Exception:
+                pass
         for p in self._products:
             if p["id"] == product_id:
                 return p
@@ -104,7 +165,21 @@ class Database:
 
     async def search_products(self, query: str) -> List[Dict[str, Any]]:
         q = query.lower().strip()
-        return [p for p in self._products if q in p["name"].lower() or q in p["description"].lower()]
+        all_prods = list(self._products)
+        if _db_client:
+            try:
+                docs = _db_client.collection("products").where("isActive", "==", True).limit(50).stream()
+                for d in docs:
+                    data = d.to_dict()
+                    if data.get("isDeleted") is True:
+                        continue
+                    data["id"] = d.id
+                    data["price"] = data.get("effectivePrice") or data.get("price") or 0
+                    data["image_url"] = (data.get("images") or [None])[0] or "https://asox.uz/icons/icon-512x512.png"
+                    all_prods.append(data)
+            except Exception:
+                pass
+        return [p for p in all_prods if q in str(p.get("name", "")).lower() or q in str(p.get("description", "")).lower()]
 
     async def add_product(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         async with self._lock:
@@ -145,10 +220,9 @@ class Database:
     async def get_cart(self, user_id: int) -> List[Dict[str, Any]]:
         async with self._lock:
             items = self._carts.get(user_id, [])
-            # Hydrate with product details
             result = []
             for item in items:
-                prod = next((p for p in self._products if p["id"] == item["product_id"]), None)
+                prod = await self.get_product_by_id(item["product_id"])
                 if prod:
                     result.append({
                         "product": prod,
@@ -200,16 +274,32 @@ class Database:
             order_id = f"ASOX-{len(self._orders) + 1001}"
             order = {
                 "id": order_id,
+                "orderNumber": order_id,
                 "user_id": user_id,
-                "user_name": user_name,
-                "phone_number": phone_number,
+                "userId": f"tg_{user_id}",
+                "telegramUserId": user_id,
+                "customerName": user_name,
+                "customerPhone": phone_number,
                 "address": address_or_location,
-                "payment_method": payment_method,
+                "paymentMethod": payment_method,
                 "items": cart_items,
-                "total_amount": total_amount,
+                "total": total_amount,
+                "totalAmount": total_amount,
                 "status": "pending",
+                "source": "telegram_bot",
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
             }
+
+            # Write to Firestore if connected
+            if _db_client:
+                try:
+                    _db_client.collection("orders").document(order_id).set({
+                        **order,
+                        "createdAt": firestore.SERVER_TIMESTAMP,
+                    })
+                except Exception:
+                    pass
+
             self._orders.append(order)
             self._carts[user_id] = []
             return order
@@ -231,6 +321,14 @@ class Database:
             for o in self._orders:
                 if o["id"] == order_id:
                     o["status"] = new_status
+                    if _db_client:
+                        try:
+                            _db_client.collection("orders").document(order_id).update({
+                                "status": new_status,
+                                "updatedAt": firestore.SERVER_TIMESTAMP
+                            })
+                        except Exception:
+                            pass
                     return True
             return False
 
