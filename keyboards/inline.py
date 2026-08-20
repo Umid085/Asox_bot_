@@ -51,9 +51,8 @@ def get_cart_keyboard(cart_items: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
 def get_payment_methods_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💵 Naqd pul (Yetkazib berilganda)", callback_data="pay:naqd")],
-            [InlineKeyboardButton(text="💳 Click", callback_data="pay:click")],
-            [InlineKeyboardButton(text="💳 Payme", callback_data="pay:payme")],
+            [InlineKeyboardButton(text="💳 Click orqali to'lov", callback_data="pay:click")],
+            [InlineKeyboardButton(text="💳 Payme orqali to'lov", callback_data="pay:payme")],
             [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_checkout")]
         ]
     )

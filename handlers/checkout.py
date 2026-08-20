@@ -87,9 +87,8 @@ async def process_location(message: Message, state: FSMContext):
 
 @router.callback_query(CheckoutStates.waiting_for_payment, F.data.startswith("pay:"))
 async def process_payment_and_finish(callback: CallbackQuery, state: FSMContext, bot: Bot):
-    payment_code = callback.data.split(":")[1]
-    payment_map = {"naqd": "💵 Naqd pul", "click": "💳 Click", "payme": "💳 Payme"}
-    payment_method = payment_map.get(payment_code, "Naqd")
+    payment_map = {"click": "💳 Click", "payme": "💳 Payme"}
+    payment_method = payment_map.get(payment_code, "💳 Payme")
 
     data = await state.get_data()
     phone = data.get("phone_number", "Kiritilmagan")
