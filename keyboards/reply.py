@@ -1,14 +1,22 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-def get_main_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
+def get_main_keyboard() -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="🛍 Mahsulotlar Katalogi"), KeyboardButton(text="🛒 Savat")],
         [KeyboardButton(text="📦 Buyurtmalarim"), KeyboardButton(text="👤 Profilim")],
         [KeyboardButton(text="📞 Biz bilan bog'lanish"), KeyboardButton(text="🔍 Qidiruv")]
     ]
-    if is_admin:
-        buttons.append([KeyboardButton(text="⚙️ Admin Panel")])
+    return ReplyKeyboardMarkup(
+        keyboard=buttons,
+        resize_keyboard=True,
+        persistent=True
+    )
 
+def get_admin_keyboard() -> ReplyKeyboardMarkup:
+    buttons = [
+        [KeyboardButton(text="📦 Barcha buyurtmalar"), KeyboardButton(text="📊 Tizim statistikasi")],
+        [KeyboardButton(text="➕ Yangi mahsulot qo'shish"), KeyboardButton(text="📢 Xabar tarqatish")]
+    ]
     return ReplyKeyboardMarkup(
         keyboard=buttons,
         resize_keyboard=True,

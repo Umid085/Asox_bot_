@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from database.db import db
-from config import ADMIN_IDS
+from config import ADMIN_IDS, is_admin_user
 from states.states import CheckoutStates
 from keyboards.reply import get_phone_keyboard, get_location_keyboard, get_main_keyboard
 from keyboards.inline import get_payment_methods_keyboard, get_admin_order_keyboard
@@ -87,6 +87,7 @@ async def process_location(message: Message, state: FSMContext):
 
 @router.callback_query(CheckoutStates.waiting_for_payment, F.data.startswith("pay:"))
 async def process_payment_and_finish(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    payment_code = callback.data.split(":")[1]
     payment_map = {"click": "💳 Click", "payme": "💳 Payme"}
     payment_method = payment_map.get(payment_code, "💳 Payme")
 
@@ -130,8 +131,7 @@ async def process_payment_and_finish(callback: CallbackQuery, state: FSMContext,
         f"⚡️ Operatorimiz tez orada siz bilan bog'lanadi!"
     )
 
-    is_admin = user_id in ADMIN_IDS
-    await callback.message.answer(user_confirm_text, reply_markup=get_main_keyboard(is_admin=is_admin), parse_mode="Markdown")
+    await callback.message.answer(user_confirm_text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
 
     # Notify Admins about new order
     admin_notify_text = (
@@ -160,6 +160,5 @@ async def process_payment_and_finish(callback: CallbackQuery, state: FSMContext,
 @router.callback_query(F.data == "cancel_checkout")
 async def cancel_checkout_cb(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    is_admin = callback.from_user.id in ADMIN_IDS
-    await callback.message.answer("❌ Buyurtma berish bekor qilindi.", reply_markup=get_main_keyboard(is_admin=is_admin))
+    await callback.message.answer("❌ Buyurtma berish bekor qilindi.", reply_markup=get_main_keyboard())
     await callback.answer()

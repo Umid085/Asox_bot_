@@ -3,10 +3,13 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 
 from database.db import db
-from config import ADMIN_IDS
+from config import ADMIN_IDS, is_admin_user
 from states.states import AdminStates
 from keyboards.inline import get_admin_order_keyboard, get_categories_keyboard
 from utils.formatters import format_price, get_order_status_badge
+
+from aiogram.filters import CommandStart, Command
+from keyboards.reply import get_admin_keyboard
 
 router = Router()
 
@@ -20,17 +23,94 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-@router.message(F.text == "⚙️ Admin Panel")
+@router.message(CommandStart())
+async def admin_cmd_start(message: Message, state: FSMContext):
+    await state.clear()
+    user_id = message.from_user.id
+    username = message.from_user.username
+    full_name = message.from_user.full_name or "Admin"
+
+    if not is_admin_user(user_id, username):
+        await message.answer("⛔️ <b>Kechirasiz, bu bot faqat ASOX Market ma'murlari (admin) uchun mo'ljallangan.</b>", parse_mode="HTML")
+        return
+
+    welcome_text = (
+        f"👑 <b>Assalomu alaykum, {full_name}!</b>\n\n"
+        f"🛠 <b>ASOX Market Admin Boshqaruv Boti</b>ga xush kelibsiz.\n\n"
+        f"Quyidagi bo'limlar orqali buyurtmalarni boshqarishingiz, statistika ko'rishingiz va yangi mahsulotlar qo'shishingiz mumkin:"
+    )
+    await message.answer(welcome_text, reply_markup=get_admin_keyboard(), parse_mode="HTML")
+    await message.answer("⚙️ <b>Boshqaruv paneli:</b>", reply_markup=get_admin_panel_keyboard(), parse_mode="HTML")
+
+@router.message(F.text.in_(["⚙️ Admin Panel", "🛠 Boshqaruv"]))
 async def show_admin_panel(message: Message):
-    if message.from_user.id not in ADMIN_IDS:
+    if not is_admin_user(message.from_user.id, message.from_user.username):
         await message.answer("⛔️ Kechirasiz, sizda admin huquqlari yo'q.")
         return
 
     await message.answer("⚙️ **ASOX Market Admin Paneli**", reply_markup=get_admin_panel_keyboard(), parse_mode="Markdown")
 
+@router.message(F.text == "📊 Tizim statistikasi")
+async def admin_stats_text(message: Message):
+    if not is_admin_user(message.from_user.id, message.from_user.username):
+        return
+    users_count = await db.get_users_count()
+    all_orders = await db.get_all_orders()
+    total_revenue = sum(o.get("total_amount", 0) for o in all_orders if o.get("status") == "delivered")
+    stats_text = (
+        f"📊 **ASOX Market Statistikasi**\n\n"
+        f"👥 **Foydalanuvchilar soni:** {users_count} ta\n"
+        f"📦 **Jami buyurtmalar:** {len(all_orders)} ta\n"
+        f"💰 **Jami tushum (Bajarilgan):** {format_price(total_revenue)}"
+    )
+    await message.answer(stats_text, reply_markup=get_admin_panel_keyboard(), parse_mode="Markdown")
+
+@router.message(F.text == "📦 Barcha buyurtmalar")
+async def admin_view_orders_text(message: Message):
+    if not is_admin_user(message.from_user.id, message.from_user.username):
+        return
+    orders = await db.get_all_orders()
+    if not orders:
+        await message.answer("Hozircha buyurtmalar yo'q.")
+        return
+    for order in orders[:5]:
+        items_summary = "".join(f"• {i.get('product', {}).get('name', 'Tovar')} ({i.get('quantity', 1)}x)\n" for i in order.get("items", []))
+        text = (
+            f"🆔 **Order #{order.get('id', '')}** ({order.get('created_at', '')})\n"
+            f"👤 **Mijoz:** {order.get('user_name', '')} (`{order.get('user_id', '')}`)\n"
+            f"📱 **Tel:** {order.get('phone_number', '')}\n"
+            f"📍 **Manzil:** {order.get('address', '')}\n"
+            f"💰 **Summa:** {format_price(order.get('total_amount', 0))}\n"
+            f"📊 **Holati:** {get_order_status_badge(order.get('status', 'pending'))}\n\n"
+            f"📦 **Mahsulotlar:**\n{items_summary}"
+        )
+        await message.answer(
+            text,
+            reply_markup=get_admin_order_keyboard(order.get('id', ''), order.get('status', 'pending')),
+            parse_mode="Markdown"
+        )
+
+@router.message(F.text == "➕ Yangi mahsulot qo'shish")
+async def admin_add_product_text(message: Message, state: FSMContext):
+    if not is_admin_user(message.from_user.id, message.from_user.username):
+        return
+    await state.set_state(AdminStates.waiting_for_product_name)
+    await message.answer("📝 **Yangi mahsulot nomini kiriting:**", parse_mode="Markdown")
+
+@router.message(F.text == "📢 Xabar tarqatish")
+async def admin_broadcast_text(message: Message, state: FSMContext):
+    if not is_admin_user(message.from_user.id, message.from_user.username):
+        return
+    await state.set_state(AdminStates.waiting_for_broadcast_text)
+    await message.answer(
+        "📢 **Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:**\n\n"
+        "(Matn, rasm yoki media yuborishingiz mumkin. Bekor qilish uchun ❌ Bekor qilish tugmasini bosing)",
+        parse_mode="Markdown"
+    )
+
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats_cb(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
         return
 
     users_count = await db.get_users_count()
@@ -48,7 +128,7 @@ async def admin_stats_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_view_orders")
 async def admin_view_orders_cb(callback: CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
         return
 
     orders = await db.get_all_orders()
@@ -76,7 +156,7 @@ async def admin_view_orders_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("adm_ord:"))
 async def admin_change_order_status(callback: CallbackQuery, bot: Bot):
-    if callback.from_user.id not in ADMIN_IDS:
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
         return
 
     _, order_id, new_status = callback.data.split(":")
@@ -103,7 +183,7 @@ async def admin_change_order_status(callback: CallbackQuery, bot: Bot):
 # Add product flow
 @router.callback_query(F.data == "admin_add_product")
 async def admin_add_product_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id not in ADMIN_IDS:
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
         return
 
     await state.set_state(AdminStates.waiting_for_product_name)
@@ -172,7 +252,7 @@ async def process_prod_image(message: Message, state: FSMContext):
 # Broadcast functionality
 @router.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id not in ADMIN_IDS:
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
         return
 
     await state.set_state(AdminStates.waiting_for_broadcast_text)

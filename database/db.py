@@ -332,5 +332,23 @@ class Database:
                     return True
             return False
 
+    async def link_shop_telegram(self, shop_id: str, telegram_chat_id: int, telegram_username: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        if _db_client:
+            try:
+                doc_ref = _db_client.collection("shops").document(shop_id)
+                doc = doc_ref.get()
+                if doc.exists:
+                    doc_ref.update({
+                        "telegramChatId": str(telegram_chat_id),
+                        "telegramUsername": telegram_username or "",
+                        "telegramLinkedAt": firestore.SERVER_TIMESTAMP
+                    })
+                    data = doc.to_dict()
+                    data["id"] = doc.id
+                    return data
+            except Exception as e:
+                print(f"Error linking shop {shop_id}: {e}")
+        return None
+
 # Global database instance
 db = Database()

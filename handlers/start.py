@@ -1,40 +1,55 @@
 import html
 from aiogram import Router, F
 from aiogram.types import Message
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.fsm.context import FSMContext
 
 from database.db import db
-from config import ADMIN_IDS
+from config import ADMIN_IDS, is_admin_user
 from keyboards.reply import get_main_keyboard
 from utils.formatters import format_price
 
 router = Router()
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, command: CommandObject = None):
     await state.clear()
     user_id = message.from_user.id
     username = message.from_user.username
     full_name = message.from_user.full_name or "Foydalanuvchi"
 
     await db.get_or_create_user(user_id, username, full_name)
-    is_admin = user_id in ADMIN_IDS
+
+    # Sotuvchi do'konini ulash uchun kirgan bo'lsa: /start shop_12345
+    if command and command.args and command.args.startswith("shop_"):
+        shop_id = command.args.replace("shop_", "").strip()
+        if shop_id:
+            shop = await db.link_shop_telegram(shop_id, user_id, username)
+            shop_name = (shop.get("name") if shop else None) or shop_id
+            await message.answer(
+                f"✅ <b>Do'koningiz ASOX Market botiga muvaffaqiyatli ulandi!</b>\n\n"
+                f"🏪 <b>Do'kon:</b> <b>{html.escape(shop_name)}</b>\n"
+                f"🆔 <b>Do'kon ID:</b> <code>{html.escape(shop_id)}</code>\n"
+                f"👤 <b>Telegram ID:</b> <code>{user_id}</code>\n\n"
+                f"🔔 Endi ushbu do'konga yangi buyurtma tushganda, barcha tafsilotlar real vaqtda shu yerga yuboriladi.",
+                reply_markup=get_main_keyboard(),
+                parse_mode="HTML"
+            )
+            return
 
     welcome_text = (
         f"👋 <b>Xush kelibsiz, {html.escape(full_name)}!</b>\n\n"
         f"🛒 <b>ASOX Market</b> rasmiy botiga xush kelibsiz.\n"
-        f"Bu yerda siz eng zamonaviy smartfonlar, noutbuklar, maishiy texnika va aksessuarlarni qulay narxlarda buyurtma qilishingiz mumkin!\n\n"
+        f"Bu yerda siz eng sara mahsulotlar, kiyimlar, poligrafiya va suvenirlarni qulay narxlarda buyurtma qilishingiz mumkin!\n\n"
         f"👇 Kerakli bo'limni tanlash uchun pastdagi menyudan foydalaning."
     )
     
-    await message.answer(welcome_text, reply_markup=get_main_keyboard(is_admin=is_admin), parse_mode="HTML")
+    await message.answer(welcome_text, reply_markup=get_main_keyboard(), parse_mode="HTML")
 
 @router.message(F.text == "❌ Bekor qilish")
 async def process_cancel(message: Message, state: FSMContext):
     await state.clear()
-    is_admin = message.from_user.id in ADMIN_IDS
-    await message.answer("Amal bekor qilindi.", reply_markup=get_main_keyboard(is_admin=is_admin))
+    await message.answer("Amal bekor qilindi.", reply_markup=get_main_keyboard())
 
 @router.message(F.text == "👤 Profilim")
 async def process_profile(message: Message):

@@ -6,9 +6,8 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-from config import BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_PATH, PORT, ENVIRONMENT
+from config import BOT_TOKEN, ADMIN_BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_PATH, PORT, ENVIRONMENT
 from handlers import start, catalog, cart, checkout, orders, admin
 
 # Setup logging
@@ -18,72 +17,52 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-async def on_startup(bot: Bot):
-    if WEBHOOK_DOMAIN:
-        webhook_url = f"{WEBHOOK_DOMAIN}{WEBHOOK_PATH}"
-        logging.info(f"Setting webhook to: {webhook_url}")
-        await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    else:
-        logging.info("Running in Long Polling mode (No WEBHOOK_DOMAIN set)")
-
 async def main():
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        logging.error("❌ BOT_TOKEN is missing or not set in .env file!")
-        logging.error("Please edit .env file and set your Telegram Bot Token from @BotFather.")
+    polling_tasks = []
+
+    # 1. Main User & Seller Bot (@AsoxUz_Bot)
+    if BOT_TOKEN and BOT_TOKEN != "YOUR_BOT_TOKEN_HERE":
+        bot_user = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        dp_user = Dispatcher()
+        dp_user.include_router(start.router)
+        dp_user.include_router(catalog.router)
+        dp_user.include_router(cart.router)
+        dp_user.include_router(checkout.router)
+        dp_user.include_router(orders.router)
+        await bot_user.delete_webhook(drop_pending_updates=True)
+        logging.info("🚀 ASOX Market User Bot (@AsoxUz_Bot) starting...")
+        polling_tasks.append(dp_user.start_polling(bot_user))
+
+    # 2. Dedicated Admin Bot (@asox_admin_bot)
+    if ADMIN_BOT_TOKEN and ADMIN_BOT_TOKEN != "YOUR_ADMIN_BOT_TOKEN_HERE":
+        bot_admin = Bot(token=ADMIN_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        dp_admin = Dispatcher()
+        dp_admin.include_router(admin.router)
+        await bot_admin.delete_webhook(drop_pending_updates=True)
+        logging.info("👑 ASOX Market Admin Bot (@asox_admin_bot) starting...")
+        polling_tasks.append(dp_admin.start_polling(bot_admin))
+
+    if not polling_tasks:
+        logging.error("❌ No bot tokens configured in .env!")
         return
 
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
+    # Background HTTP health-check for web hosting / Render
+    async def handle_health_check(request):
+        return web.Response(text="ASOX Market Telegram Bots (User + Admin) are running OK!")
 
-    # Register Routers
-    dp.include_router(start.router)
-    dp.include_router(catalog.router)
-    dp.include_router(cart.router)
-    dp.include_router(checkout.router)
-    dp.include_router(orders.router)
-    dp.include_router(admin.router)
+    app = web.Application()
+    app.router.add_get('/', handle_health_check)
+    app.router.add_get('/health', handle_health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
+    await site.start()
+    logging.info(f"🚀 Health check HTTP server running on port {PORT}...")
 
-    if WEBHOOK_DOMAIN:
-        # Webhook Mode for Production Server (Render / Railway / VPS)
-        app = web.Application()
-        webhook_requests_handler = SimpleRequestHandler(
-            dispatcher=dp,
-            bot=bot
-        )
-        webhook_requests_handler.register(app, path=WEBHOOK_PATH)
-        setup_application(app, dp, bot=bot)
-        
-        dp.startup.register(on_startup)
-        
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
-        logging.info(f"🚀 Webhook server starting on port {PORT}...")
-        await site.start()
-        
-        # Keep running
-        await asyncio.Event().wait()
-    else:
-        # Polling Mode with background HTTP health-check for Render Free Web Service
-        async def handle_health_check(request):
-            return web.Response(text="ASOX Market Telegram Bot is running OK!")
-
-        app = web.Application()
-        app.router.add_get('/', handle_health_check)
-        app.router.add_get('/health', handle_health_check)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
-        await site.start()
-        logging.info(f"🚀 Health check HTTP server running on port {PORT}...")
-
-        logging.info("🚀 ASOX Market Telegram Bot started in Polling mode...")
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
-
+    await asyncio.gather(*polling_tasks)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Bot stopped.")
+        logging.info("Bots stopped.")
