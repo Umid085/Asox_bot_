@@ -21,8 +21,7 @@ def get_products_keyboard(products: List[Dict[str, Any]], cat_id: str) -> Inline
 def get_product_detail_keyboard(product_id: str, cat_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🛒 Savatga qo'shish", callback_data=f"add_cart:{product_id}")],
-            [InlineKeyboardButton(text="🛍 Savatga o'tish", callback_data="view_cart")],
+            [InlineKeyboardButton(text="🌐 Saytda ko'rish va xarid qilish", url=f"https://asox.uz/app/product/{product_id}")],
             [InlineKeyboardButton(text="⬅️ Ortga", callback_data=f"cat:{cat_id}")]
         ]
     )

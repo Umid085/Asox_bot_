@@ -17,6 +17,8 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📦 Barcha buyurtmalar", callback_data="admin_view_orders")],
+            [InlineKeyboardButton(text="🎨 Dizaynerlar arizalari", callback_data="admin_view_designers")],
+            [InlineKeyboardButton(text="🛵 Kuryerlar arizalari", callback_data="admin_view_couriers")],
             [InlineKeyboardButton(text="➕ Yangi mahsulot qo'shish", callback_data="admin_add_product")],
             [InlineKeyboardButton(text="📊 Tizim statistikasi", callback_data="admin_stats")],
             [InlineKeyboardButton(text="📢 Xabar tarqatish (Broadcast)", callback_data="admin_broadcast")]
@@ -290,4 +292,118 @@ async def process_broadcast_message(message: Message, state: FSMContext, bot: Bo
         f"🔴 Xatolik (Bloklangan): {count_fail} ta",
         parse_mode="Markdown"
     )
+
+# 🎨 Dizaynerlar arizalari
+@router.message(F.text == "🎨 Dizaynerlar arizalari")
+@router.callback_query(F.data == "admin_view_designers")
+async def admin_view_designers_handler(event: Message | CallbackQuery):
+    user_id = event.from_user.id
+    username = event.from_user.username
+    if not is_admin_user(user_id, username):
+        return
+
+    msg = event if isinstance(event, Message) else event.message
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+
+    requests = await db.get_designer_requests()
+    if not requests:
+        await msg.answer("🎨 <b>Hozircha yangi dizaynerlik arizalari yo'q.</b>", parse_mode="HTML")
+        return
+
+    await msg.answer(f"🎨 <b>Jami dizaynerlik arizalari ({len(requests)} ta):</b>", parse_mode="HTML")
+    for req in requests[:10]:
+        status_badge = "⏳ Ko'rib chiqilmoqda" if req.get("status") == "pending" else ("✅ Tasdiqlangan" if req.get("status") == "approved" else "❌ Rad etilgan")
+        portfolio = f"<a href='{req.get('portfolioUrl')}'>{req.get('portfolioUrl')}</a>" if req.get("portfolioUrl") else "Ko'rsatilmagan"
+        tg = f"@{req.get('telegramUsername')}" if req.get("telegramUsername") else "Ko'rsatilmagan"
+        full_name = req.get("fullName") or "Noma'lum"
+        phone = req.get("phoneNumber") or ""
+        specialty = req.get("specialty") or "Umumiy"
+        text = (
+            f"🎨 <b>Dizayner: {full_name}</b>\n"
+            f"📞 <b>Tel:</b> <code>{phone}</code>\n"
+            f"💬 <b>Telegram:</b> {tg}\n"
+            f"🎯 <b>Yo'nalish:</b> {specialty}\n"
+            f"🌐 <b>Portfolio:</b> {portfolio}\n"
+            f"📊 <b>Holati:</b> {status_badge}"
+        )
+        buttons = []
+        if req.get("status") == "pending":
+            buttons.append([
+                InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"appr_des_{req.get('id')}"),
+                InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rejc_des_{req.get('id')}")
+            ])
+        await msg.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None, parse_mode="HTML")
+
+# 🛵 Samarqand kuryerlari arizalari
+@router.message(F.text == "🛵 Kuryerlar arizalari")
+@router.callback_query(F.data == "admin_view_couriers")
+async def admin_view_couriers_handler(event: Message | CallbackQuery):
+    user_id = event.from_user.id
+    username = event.from_user.username
+    if not is_admin_user(user_id, username):
+        return
+
+    msg = event if isinstance(event, Message) else event.message
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+
+    requests = await db.get_courier_requests()
+    if not requests:
+        await msg.answer("🛵 <b>Hozircha yangi kuryerlik arizalari yo'q.</b>", parse_mode="HTML")
+        return
+
+    await msg.answer(f"🛵 <b>Jami Samarqand kuryerlik arizalari ({len(requests)} ta):</b>", parse_mode="HTML")
+    for req in requests[:10]:
+        status_badge = "⏳ Ko'rib chiqilmoqda" if req.get("status") == "pending" else ("✅ Tasdiqlangan" if req.get("status") == "approved" else "❌ Rad etilgan")
+        tg = f"@{req.get('telegramUsername')}" if req.get("telegramUsername") else "Ko'rsatilmagan"
+        full_name = req.get("fullName") or "Noma'lum"
+        phone = req.get("phoneNumber") or ""
+        city = req.get("city") or "Samarqand"
+        vehicle = req.get("vehicle") or "Skuter / Moped"
+        text = (
+            f"🛵 <b>Kuryer: {full_name}</b>\n"
+            f"📞 <b>Tel:</b> <code>{phone}</code>\n"
+            f"💬 <b>Telegram:</b> {tg}\n"
+            f"📍 <b>Hudud:</b> {city}\n"
+            f"🚗 <b>Transport:</b> {vehicle}\n"
+            f"📊 <b>Holati:</b> {status_badge}"
+        )
+        buttons = []
+        if req.get("status") == "pending":
+            buttons.append([
+                InlineKeyboardButton(text="✅ Kuryerlikka qo'shish", callback_data=f"appr_cou_{req.get('id')}"),
+                InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rejc_cou_{req.get('id')}")
+            ])
+        await msg.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None, parse_mode="HTML")
+
+# Action callbacks
+@router.callback_query(F.data.startswith("appr_des_"))
+async def approve_designer_cb(callback: CallbackQuery):
+    req_id = callback.data.replace("appr_des_", "")
+    await db.update_designer_request_status(req_id, "approved")
+    await callback.message.edit_text(callback.message.html_text + "\n\n✅ <b>Dizayner arizasi tasdiqlandi!</b>", parse_mode="HTML")
+    await callback.answer("Dizayner tasdiqlandi!")
+
+@router.callback_query(F.data.startswith("rejc_des_"))
+async def reject_designer_cb(callback: CallbackQuery):
+    req_id = callback.data.replace("rejc_des_", "")
+    await db.update_designer_request_status(req_id, "rejected")
+    await callback.message.edit_text(callback.message.html_text + "\n\n❌ <b>Ariza rad etildi.</b>", parse_mode="HTML")
+    await callback.answer("Ariza rad etildi.")
+
+@router.callback_query(F.data.startswith("appr_cou_"))
+async def approve_courier_cb(callback: CallbackQuery):
+    req_id = callback.data.replace("appr_cou_", "")
+    await db.update_courier_request_status(req_id, "approved")
+    await callback.message.edit_text(callback.message.html_text + "\n\n✅ <b>Kuryer arizasi tasdiqlandi!</b>", parse_mode="HTML")
+    await callback.answer("Kuryer tasdiqlandi!")
+
+@router.callback_query(F.data.startswith("rejc_cou_"))
+async def reject_courier_cb(callback: CallbackQuery):
+    req_id = callback.data.replace("rejc_cou_", "")
+    await db.update_courier_request_status(req_id, "rejected")
+    await callback.message.edit_text(callback.message.html_text + "\n\n❌ <b>Ariza rad etildi.</b>", parse_mode="HTML")
+    await callback.answer("Ariza rad etildi.")
+
 

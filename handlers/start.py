@@ -1,15 +1,39 @@
 import html
+
+import aiohttp
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.fsm.context import FSMContext
 
 from database.db import db
-from config import ADMIN_IDS, is_admin_user
+from config import ADMIN_IDS, ADMIN_BOT_TOKEN, is_admin_user
 from keyboards.reply import get_main_keyboard
 from utils.formatters import format_price
 
 router = Router()
+
+
+async def _notify_admins(text: str) -> None:
+    """Adminlarga admin-bot orqali xabar yuboradi. Event loop'ni bloklamaydi."""
+    if not ADMIN_BOT_TOKEN or not ADMIN_IDS:
+        return
+    url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
+    timeout = aiohttp.ClientTimeout(total=5)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for admin_id in ADMIN_IDS:
+                try:
+                    await session.post(url, json={
+                        "chat_id": admin_id,
+                        "text": text,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    })
+                except Exception as e:
+                    print(f"Error sending admin notification to {admin_id}: {e}")
+    except Exception as e:
+        print(f"Error opening admin notification session: {e}")
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject = None):
@@ -39,12 +63,27 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject 
 
     welcome_text = (
         f"👋 <b>Xush kelibsiz, {html.escape(full_name)}!</b>\n\n"
-        f"🛒 <b>ASOX Market</b> rasmiy botiga xush kelibsiz.\n"
-        f"Bu yerda siz eng sara mahsulotlar, kiyimlar, poligrafiya va suvenirlarni qulay narxlarda buyurtma qilishingiz mumkin!\n\n"
-        f"👇 Kerakli bo'limni tanlash uchun pastdagi menyudan foydalaning."
+        f"🛍 <b>ASOX Market</b> rasmiy botiga xush kelibsiz.\n"
+        f"Bu yerda siz mahsulotlar katalogini ko'rishingiz, sotuvchi sifatida o'z do'koningizni ulab buyurtma bildirishnomalarini olishingiz mumkin.\n\n"
+        f"🛒 Xaridlarni amalga oshirish uchun rasmiy <a href='https://asox.uz'>asox.uz</a> saytimizga o'ting!"
     )
     
     await message.answer(welcome_text, reply_markup=get_main_keyboard(), parse_mode="HTML")
+
+@router.message(F.text == "🌐 ASOX Market sayti")
+async def process_website_btn(message: Message):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🌐 ASOX Market saytiga o'tish", url="https://asox.uz/app")]
+        ]
+    )
+    await message.answer(
+        "🛒 <b>ASOX Market Rasmiy Sayti</b>\n\n"
+        "Mahsulotlarni to'liq ko'rish, savatga qo'shish va onlayn xarid qilish uchun quyidagi tugmani bosing:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
 
 @router.message(F.text == "❌ Bekor qilish")
 async def process_cancel(message: Message, state: FSMContext):
@@ -55,7 +94,6 @@ async def process_cancel(message: Message, state: FSMContext):
 async def process_profile(message: Message):
     user_id = message.from_user.id
     user = await db.get_or_create_user(user_id)
-    orders = await db.get_user_orders(user_id)
 
     phone = user.get("phone_number") or "Kiritilmagan"
     full_name = html.escape(user.get('full_name') or 'Mavjud emas')
@@ -64,7 +102,7 @@ async def process_profile(message: Message):
         f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
         f"👤 <b>Ism:</b> {full_name}\n"
         f"📱 <b>Telefon:</b> {html.escape(str(phone))}\n"
-        f"📦 <b>Jami buyurtmalar:</b> {len(orders)} ta\n"
+        f"🌐 <b>Sayt:</b> <a href='https://asox.uz'>asox.uz</a>\n"
     )
     await message.answer(profile_text, parse_mode="HTML")
 
@@ -79,5 +117,250 @@ async def process_contact(message: Message):
         f"📍 <b>Manzil:</b> Oʻzbekiston, Samarqand shahri, Sadaf MFY, Gagarin ko'chasi, 60"
     )
     await message.answer(contact_text, parse_mode="HTML", disable_web_page_preview=True)
+
+# ----------------------------------------------------
+# 🎨 DIZAYNER BO'LISH ARIZA OQIMI
+# ----------------------------------------------------
+from states.states import DesignerApplyStates, CourierApplyStates
+from keyboards.reply import get_phone_keyboard
+
+@router.message(F.text.in_(["🎨 Dizayner bo'lish", "Dizayner bo'lish", "🎨 Dizayner"]))
+async def designer_apply_start(message: Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(DesignerApplyStates.waiting_for_name)
+    user_name = message.from_user.full_name or ""
+    await message.answer(
+        "🎨 <b>ASOX Market Dizaynerlar Jamoasiga Qabul!</b>\n\n"
+        "O'z dizaynlaringiz, illyustratsiyalaringiz va mualliflik merchingizni platformamizda soting!\n\n"
+        "1️⃣ <b>Ism va Familiyangizni kiriting:</b>\n"
+        f"(Masalan: <i>{user_name or 'Alisher Zokirov'}</i>)",
+        parse_mode="HTML"
+    )
+
+@router.message(DesignerApplyStates.waiting_for_name)
+async def designer_apply_name(message: Message, state: FSMContext):
+    name = message.text.strip()
+    await state.update_data(fullName=name)
+    await state.set_state(DesignerApplyStates.waiting_for_phone)
+    await message.answer(
+        "2️⃣ <b>Bog'lanish uchun telefon raqamingizni yuboring:</b>\n\n"
+        "(Pastdagi tugmani bosing yoki <code>+998901234567</code> formatida yozing)",
+        reply_markup=get_phone_keyboard(),
+        parse_mode="HTML"
+    )
+
+@router.message(DesignerApplyStates.waiting_for_phone)
+async def designer_apply_phone(message: Message, state: FSMContext):
+    if message.contact:
+        phone = message.contact.phone_number
+    else:
+        phone = message.text.strip()
+    if not phone.startswith("+") and not phone.startswith("998"):
+        phone = f"+{phone}"
+
+    await state.update_data(phoneNumber=phone)
+    await state.set_state(DesignerApplyStates.waiting_for_specialty)
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    spec_kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="👕 Merch & Kiyimlar"), KeyboardButton(text="📇 Poligrafiya & Vizitkalar")],
+            [KeyboardButton(text="☕ Suvenirlar & Krujkalar"), KeyboardButton(text="🎨 Badiiy Illyustratsiya")],
+            [KeyboardButton(text="❌ Bekor qilish")]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer(
+        "3️⃣ <b>Asosiy dizayn yo'nalishingizni tanlang:</b>",
+        reply_markup=spec_kb,
+        parse_mode="HTML"
+    )
+
+@router.message(DesignerApplyStates.waiting_for_specialty)
+async def designer_apply_specialty(message: Message, state: FSMContext):
+    if message.text == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("Ariza bekor qilindi.", reply_markup=get_main_keyboard())
+        return
+
+    specialty = message.text.strip()
+    await state.update_data(specialty=specialty)
+    await state.set_state(DesignerApplyStates.waiting_for_portfolio)
+    await message.answer(
+        "4️⃣ <b>Portfolio, Behance, Instagram yoki ish namunalaringiz havolasini yuboring:</b>\n\n"
+        "(Agar havola bo'lmasa, qisqacha tajribangizni yozib qoldiring)",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
+
+@router.message(DesignerApplyStates.waiting_for_portfolio)
+async def designer_apply_finish(message: Message, state: FSMContext):
+    portfolio = message.text.strip()
+    data = await state.get_data()
+    await state.clear()
+
+    full_name = data.get("fullName", message.from_user.full_name or "Foydalanuvchi")
+    phone = data.get("phoneNumber", "")
+    specialty = data.get("specialty", "Umumiy")
+    username = message.from_user.username or ""
+
+    # Save to database
+    req_id = await db.add_designer_request({
+        "userId": str(message.from_user.id),
+        "fullName": full_name,
+        "phoneNumber": phone,
+        "telegramUsername": username,
+        "specialty": specialty,
+        "portfolioUrl": portfolio,
+        "source": "telegram_bot"
+    })
+
+    # Send confirmation to user
+    await message.answer(
+        "🎉 <b>Arizangiz muvaffaqiyatli qabul qilindi!</b>\n\n"
+        f"📋 <b>Ariza raqami:</b> <code>#{req_id}</code>\n"
+        "Tez orada moderatorlarimiz portfoliosingizni ko'rib chiqib, siz bilan bog'lanishadi.",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
+
+    # Adminlarga bildirishnoma
+    tg_display = f"@{html.escape(username)}" if username else "ko'rsatilmagan"
+    await _notify_admins(
+        "🎨 <b>YANGI DIZAYNERLIK ARIZASI!</b>\n\n"
+        f"👤 <b>F.I.Sh:</b> {html.escape(full_name)}\n"
+        f"📞 <b>Telefon:</b> <code>{html.escape(phone)}</code>\n"
+        f"💬 <b>Telegram:</b> {tg_display}\n"
+        f"🎯 <b>Yo'nalish:</b> {html.escape(specialty)}\n"
+        f"🌐 <b>Portfolio:</b> {html.escape(portfolio)}\n\n"
+        "🌐 <a href='https://asox.uz/app'>ASOX Admin Panel</a>"
+    )
+
+# ----------------------------------------------------
+# 🛵 KURYER BO'LISH ARIZA OQIMI
+# ----------------------------------------------------
+@router.message(F.text.in_(["🛵 Kuryer bo'lish", "Kuryer bo'lish", "🛵 Kuryer"]))
+async def courier_apply_start(message: Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(CourierApplyStates.waiting_for_name)
+    user_name = message.from_user.full_name or ""
+    await message.answer(
+        "🛵 <b>ASOX Market Kuryerlik Xizmatiga Qabul!</b>\n\n"
+        "Samarqand shahri va boshqa hududlar bo'yicha tezkor yetkazib berish xizmati a'zosi bo'ling!\n\n"
+        "1️⃣ <b>Ism va Familiyangizni kiriting:</b>\n"
+        f"(Masalan: <i>{user_name or 'Otabek Fayzullayev'}</i>)",
+        parse_mode="HTML"
+    )
+
+@router.message(CourierApplyStates.waiting_for_name)
+async def courier_apply_name(message: Message, state: FSMContext):
+    name = message.text.strip()
+    await state.update_data(fullName=name)
+    await state.set_state(CourierApplyStates.waiting_for_phone)
+    await message.answer(
+        "2️⃣ <b>Bog'lanish uchun telefon raqamingizni yuboring:</b>\n\n"
+        "(Pastdagi tugmani bosing yoki <code>+998939876543</code> formatida yozing)",
+        reply_markup=get_phone_keyboard(),
+        parse_mode="HTML"
+    )
+
+@router.message(CourierApplyStates.waiting_for_phone)
+async def courier_apply_phone(message: Message, state: FSMContext):
+    if message.contact:
+        phone = message.contact.phone_number
+    else:
+        phone = message.text.strip()
+    if not phone.startswith("+") and not phone.startswith("998"):
+        phone = f"+{phone}"
+
+    await state.update_data(phoneNumber=phone)
+    await state.set_state(CourierApplyStates.waiting_for_city)
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    city_kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📍 Samarqand shahri"), KeyboardButton(text="📍 Samarqand Poligrafiyasi")],
+            [KeyboardButton(text="📍 Toshkent shahri"), KeyboardButton(text="📍 Boshqa viloyat")],
+            [KeyboardButton(text="❌ Bekor qilish")]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer(
+        "3️⃣ <b>Qaysi hududda yetkazib bera olasiz?</b>",
+        reply_markup=city_kb,
+        parse_mode="HTML"
+    )
+
+@router.message(CourierApplyStates.waiting_for_city)
+async def courier_apply_city(message: Message, state: FSMContext):
+    if message.text == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("Ariza bekor qilindi.", reply_markup=get_main_keyboard())
+        return
+
+    city = message.text.replace("📍", "").strip()
+    await state.update_data(city=city)
+    await state.set_state(CourierApplyStates.waiting_for_vehicle)
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    veh_kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🚗 Avtomobil"), KeyboardButton(text="🛵 Skuter / Moped")],
+            [KeyboardButton(text="🚲 Velosiped"), KeyboardButton(text="🚶 Piyoda")],
+            [KeyboardButton(text="❌ Bekor qilish")]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer(
+        "4️⃣ <b>Transport vositangiz turini tanlang:</b>",
+        reply_markup=veh_kb,
+        parse_mode="HTML"
+    )
+
+@router.message(CourierApplyStates.waiting_for_vehicle)
+async def courier_apply_finish(message: Message, state: FSMContext):
+    if message.text == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("Ariza bekor qilindi.", reply_markup=get_main_keyboard())
+        return
+
+    vehicle = message.text.strip()
+    data = await state.get_data()
+    await state.clear()
+
+    full_name = data.get("fullName", message.from_user.full_name or "Foydalanuvchi")
+    phone = data.get("phoneNumber", "")
+    city = data.get("city", "Samarqand shahri")
+    username = message.from_user.username or ""
+
+    # Save to database
+    req_id = await db.add_courier_request({
+        "userId": str(message.from_user.id),
+        "fullName": full_name,
+        "phoneNumber": phone,
+        "telegramUsername": username,
+        "city": city,
+        "vehicle": vehicle,
+        "source": "telegram_bot"
+    })
+
+    # Send confirmation to user
+    await message.answer(
+        "🎉 <b>Kuryerlik arizangiz muvaffaqiyatli qabul qilindi!</b>\n\n"
+        f"📋 <b>Ariza raqami:</b> <code>#{req_id}</code>\n"
+        "Tez orada operatorimiz siz bilan bog'lanib, shartlar va ish tartibini tushuntiradi.",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
+
+    # Adminlarga bildirishnoma
+    tg_display = f"@{html.escape(username)}" if username else "ko'rsatilmagan"
+    await _notify_admins(
+        "🛵 <b>YANGI KURYERLIK ARIZASI!</b>\n\n"
+        f"👤 <b>F.I.Sh:</b> {html.escape(full_name)}\n"
+        f"📞 <b>Telefon:</b> <code>{html.escape(phone)}</code>\n"
+        f"💬 <b>Telegram:</b> {tg_display}\n"
+        f"📍 <b>Hudud:</b> {html.escape(city)}\n"
+        f"🚗 <b>Transport turi:</b> {html.escape(vehicle)}\n\n"
+        "🌐 <a href='https://asox.uz/app'>ASOX Admin Panel</a>"
+    )
+
 
 

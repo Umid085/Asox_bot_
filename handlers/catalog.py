@@ -64,8 +64,8 @@ async def show_product_detail_cb(callback: CallbackQuery):
         f"📦 **{product['name']}**\n\n"
         f"📝 **Tavsif:** {product['description']}\n"
         f"⭐ **Reyting:** {product['rating']}/5.0\n"
-        f"💰 **Narxi:** **{price_fmt}**\n"
-        f"✅ **Mavjudligi:** Omborimizda bor"
+        f"💰 **Narxi:** **{price_fmt}**\n\n"
+        f"🛒 *Xarid qilish va buyurtma berish uchun quyidagi havola orqali saytga o'ting:*"
     )
 
     kb = get_product_detail_keyboard(product['id'], product['category_id'])

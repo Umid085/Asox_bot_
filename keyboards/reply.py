@@ -2,9 +2,10 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     buttons = [
-        [KeyboardButton(text="🛍 Mahsulotlar Katalogi"), KeyboardButton(text="🛒 Savat")],
-        [KeyboardButton(text="📦 Buyurtmalarim"), KeyboardButton(text="👤 Profilim")],
-        [KeyboardButton(text="📞 Biz bilan bog'lanish"), KeyboardButton(text="🔍 Qidiruv")]
+        [KeyboardButton(text="🛍 Mahsulotlar Katalogi"), KeyboardButton(text="🔍 Qidiruv")],
+        [KeyboardButton(text="🎨 Dizayner bo'lish"), KeyboardButton(text="🛵 Kuryer bo'lish")],
+        [KeyboardButton(text="🌐 ASOX Market sayti")],
+        [KeyboardButton(text="📞 Biz bilan bog'lanish"), KeyboardButton(text="👤 Profilim")]
     ]
     return ReplyKeyboardMarkup(
         keyboard=buttons,
@@ -15,6 +16,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
 def get_admin_keyboard() -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="📦 Barcha buyurtmalar"), KeyboardButton(text="📊 Tizim statistikasi")],
+        [KeyboardButton(text="🎨 Dizaynerlar arizalari"), KeyboardButton(text="🛵 Kuryerlar arizalari")],
         [KeyboardButton(text="➕ Yangi mahsulot qo'shish"), KeyboardButton(text="📢 Xabar tarqatish")]
     ]
     return ReplyKeyboardMarkup(

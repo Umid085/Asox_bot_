@@ -1,6 +1,7 @@
 import os
 import asyncio
 from datetime import datetime
+from uuid import uuid4
 from typing import Dict, List, Optional, Any
 
 # Optional Firebase Firestore integration
@@ -350,5 +351,82 @@ class Database:
                 print(f"Error linking shop {shop_id}: {e}")
         return None
 
+    async def get_designer_requests(self) -> List[Dict[str, Any]]:
+        requests = []
+        if _db_client:
+            try:
+                docs = _db_client.collection("designer_requests").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(20).stream()
+                for d in docs:
+                    data = d.to_dict()
+                    data["id"] = d.id
+                    requests.append(data)
+            except Exception as e:
+                print(f"Error fetching designer requests: {e}")
+        return requests
+
+    async def get_courier_requests(self) -> List[Dict[str, Any]]:
+        requests = []
+        if _db_client:
+            try:
+                docs = _db_client.collection("courier_requests").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(20).stream()
+                for d in docs:
+                    data = d.to_dict()
+                    data["id"] = d.id
+                    requests.append(data)
+            except Exception as e:
+                print(f"Error fetching courier requests: {e}")
+        return requests
+
+    async def update_designer_request_status(self, req_id: str, new_status: str) -> bool:
+        if _db_client:
+            try:
+                _db_client.collection("designer_requests").document(req_id).update({
+                    "status": new_status,
+                    "updatedAt": firestore.SERVER_TIMESTAMP
+                })
+                return True
+            except Exception:
+                pass
+        return False
+
+    async def update_courier_request_status(self, req_id: str, new_status: str) -> bool:
+        if _db_client:
+            try:
+                _db_client.collection("courier_requests").document(req_id).update({
+                    "status": new_status,
+                    "updatedAt": firestore.SERVER_TIMESTAMP
+                })
+                return True
+            except Exception as e:
+                print(f"Error updating courier request {req_id}: {e}")
+        return False
+
+    async def add_designer_request(self, data: Dict[str, Any]) -> str:
+        req_id = f"des_{int(datetime.now().timestamp())}_{uuid4().hex[:6]}"
+        if _db_client:
+            try:
+                _db_client.collection("designer_requests").document(req_id).set({
+                    **data,
+                    "status": "pending",
+                    "createdAt": firestore.SERVER_TIMESTAMP
+                })
+            except Exception as e:
+                print(f"Error creating designer request: {e}")
+        return req_id
+
+    async def add_courier_request(self, data: Dict[str, Any]) -> str:
+        req_id = f"cou_{int(datetime.now().timestamp())}_{uuid4().hex[:6]}"
+        if _db_client:
+            try:
+                _db_client.collection("courier_requests").document(req_id).set({
+                    **data,
+                    "status": "pending",
+                    "createdAt": firestore.SERVER_TIMESTAMP
+                })
+            except Exception as e:
+                print(f"Error creating courier request: {e}")
+        return req_id
+
 # Global database instance
 db = Database()
+
