@@ -92,7 +92,7 @@ async def make_shop_link() -> None:
         print("     Yaratish: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
         return
     token = make_shop_link_token(shop_id, SHOP_LINK_SECRET)
-    print(f"\n  ✅ Imzolangan havola (asox.uz shu shaklda generatsiya qilishi kerak):")
+    print("\n  ✅ Imzolangan havola (asox.uz shu shaklda generatsiya qilishi kerak):")
     print(f"     https://t.me/AsoxUz_Bot?start=shop_{shop_id}_{token}")
 
 

@@ -1,14 +1,14 @@
 import asyncio
 import logging
 import sys
-from aiohttp import web
 
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiohttp import web
 
-from config import BOT_TOKEN, ADMIN_BOT_TOKEN, PORT, ENVIRONMENT
-from handlers import start, catalog, cart, admin, errors
+from config import ADMIN_BOT_TOKEN, BOT_TOKEN, ENVIRONMENT, PORT
+from handlers import admin, cart, catalog, errors, start
 from middlewares import setup_throttling
 
 # Setup logging
@@ -18,8 +18,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-import json
-from database.db import Database, CATEGORIES, SAMPLE_PRODUCTS
+# Diqqat: bu import ataylab logging sozlamasidan KEYIN turadi — database.db
+# import paytida Firestore holati haqida log yozadi va u formatlangan
+# ko'rinishda chiqishi kerak.
+from database.db import CATEGORIES, SAMPLE_PRODUCTS  # noqa: E402
+
 
 async def safe_start_polling(bot: Bot, dp: Dispatcher, bot_name: str):
     try:

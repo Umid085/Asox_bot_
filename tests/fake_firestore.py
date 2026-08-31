@@ -1,16 +1,21 @@
 """Firestore klientining minimal soxta (in-memory) implementatsiyasi — test uchun."""
-import itertools, threading
+import itertools
+import threading
+
 
 class _Doc:
     def __init__(self, doc_id, data):
-        self.id, self._data = doc_id, data
+        self.id = doc_id
+        self._data = data
     @property
     def exists(self): return self._data is not None
     def to_dict(self): return dict(self._data) if self._data else None
 
 class _DocRef:
     def __init__(self, store, coll, doc_id):
-        self._store, self._coll, self.id = store, coll, doc_id
+        self._store = store
+        self._coll = coll
+        self.id = doc_id
     def get(self):
         self._store.calls.append(("get", self._coll, self.id))
         self._store.block()
@@ -19,7 +24,8 @@ class _DocRef:
         self._store.calls.append(("set", self._coll, self.id))
         self._store.block()
         cur = self._store.data[self._coll].get(self.id, {}) if merge else {}
-        cur.update(payload); self._store.data[self._coll][self.id] = cur
+        cur.update(payload)
+        self._store.data[self._coll][self.id] = cur
     def update(self, payload):
         self._store.calls.append(("update", self._coll, self.id))
         self._store.block()
@@ -29,16 +35,20 @@ class _DocRef:
 
 class _Query:
     def __init__(self, store, coll, preds=None, limit=None, order=None, desc=False):
-        self._store, self._coll = store, coll
-        self._preds, self._limit, self._order, self._desc = preds or [], limit, order, desc
+        self._store = store
+        self._coll = coll
+        self._preds = preds or []
+        self._limit = limit
+        self._order = order
+        self._desc = desc
     def _clone(self, **kw):
-        base = dict(preds=self._preds, limit=self._limit, order=self._order, desc=self._desc)
+        base = {"preds": self._preds, "limit": self._limit, "order": self._order, "desc": self._desc}
         base.update(kw)
         return _Query(self._store, self._coll, **base)
     def where(self, field=None, op=None, value=None, filter=None):
         if filter is not None:
             field, op, value = filter.field_path, filter.op_string, filter.value
-        return self._clone(preds=self._preds + [(field, op, value)])
+        return self._clone(preds=[*self._preds, (field, op, value)])
     def limit(self, n): return self._clone(limit=n)
     def order_by(self, field, direction=None):
         return self._clone(order=field, desc=(direction == "DESCENDING"))

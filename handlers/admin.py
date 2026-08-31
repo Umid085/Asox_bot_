@@ -1,19 +1,18 @@
 import asyncio
 import logging
 
-from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Bot, F, Router
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from config import is_admin_user
 from database.db import db
-from config import ADMIN_IDS, is_admin_user
-from states.states import AdminStates
 from keyboards.inline import get_admin_order_keyboard, get_categories_keyboard
+from keyboards.reply import get_admin_keyboard
+from states.states import AdminStates
 from utils.formatters import esc, format_price, get_order_status_badge
 from utils.validators import require_text
-
-from aiogram.filters import CommandStart, Command
-from keyboards.reply import get_admin_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +181,7 @@ async def admin_change_order_status(callback: CallbackQuery, bot: Bot):
         order = await db.get_order_by_id(order_id)
         status_badge = get_order_status_badge(new_status)
         await callback.answer(f"Buyurtma #{order_id} holati o'zgartirildi: {status_badge}")
-        
+
         # Update user about status change
         if order:
             try:
@@ -248,7 +247,7 @@ async def process_prod_desc(message: Message, state: FSMContext):
 async def process_prod_cat(callback: CallbackQuery, state: FSMContext):
     cat_id = callback.data.split(":")[1]
     await state.update_data(category_id=cat_id)
-    
+
     await state.set_state(AdminStates.waiting_for_product_image)
     await callback.message.answer(
         "🖼 <b>Mahsulot rasmini yuboring</b> (fayl yoki rasm ko'rinishida)\n"

@@ -23,7 +23,7 @@ def make_shop_link_token(shop_id: str, secret: str) -> str:
         raise ValueError("SHOP_LINK_SECRET sozlanmagan")
     digest = hmac.new(
         secret.encode("utf-8"),
-        f"shop:{shop_id}".encode("utf-8"),
+        f"shop:{shop_id}".encode(),
         hashlib.sha256,
     ).hexdigest()
     return digest[:SIGNATURE_LENGTH]

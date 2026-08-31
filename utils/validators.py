@@ -1,7 +1,6 @@
 """Kiruvchi Telegram xabarlarini tekshirish yordamchilari."""
 
 import re
-from typing import Optional
 
 from aiogram.types import Message
 
@@ -10,7 +9,7 @@ from aiogram.types import Message
 NON_TEXT_HINT = "❌ Iltimos, javobni <b>matn ko'rinishida</b> yuboring."
 
 
-def get_text(message: Message) -> Optional[str]:
+def get_text(message: Message) -> str | None:
     """Xabardan tozalangan matnni qaytaradi; matn bo'lmasa `None`.
 
     Rasm/hujjat izohi (`caption`) ham matn sifatida qabul qilinadi.
@@ -22,7 +21,7 @@ def get_text(message: Message) -> Optional[str]:
     return cleaned or None
 
 
-async def require_text(message: Message, hint: str = NON_TEXT_HINT) -> Optional[str]:
+async def require_text(message: Message, hint: str = NON_TEXT_HINT) -> str | None:
     """Matnni qaytaradi yoki foydalanuvchiga ko'rsatma yuborib `None` qaytaradi.
 
     Chaqiruvchi `None` kelganda FSM holatini o'zgartirmasdan `return` qilishi
@@ -42,7 +41,7 @@ MIN_INTL_DIGITS = 10
 MAX_INTL_DIGITS = 15
 
 
-def normalize_phone(raw: Optional[str]) -> Optional[str]:
+def normalize_phone(raw: str | None) -> str | None:
     """Telefon raqamini `+998901234567` ko'rinishiga keltiradi.
 
     Ilgari `if not phone.startswith("+") and not phone.startswith("998")`

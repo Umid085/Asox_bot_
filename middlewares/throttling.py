@@ -8,7 +8,8 @@ Firestore'ni to'ldirib tashlashi mumkin edi.
 import logging
 import time
 from collections import OrderedDict
-from typing import Any, Awaitable, Callable, Dict, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from aiogram import BaseMiddleware, Dispatcher
 from aiogram.types import CallbackQuery, Message, TelegramObject
@@ -37,14 +38,14 @@ class ThrottlingMiddleware(BaseMiddleware):
         self.rate_limit = rate_limit
         self.warn_every = warn_every
         self.max_tracked = max_tracked
-        self._last_seen: "OrderedDict[int, float]" = OrderedDict()
-        self._last_warn: Dict[int, float] = {}
+        self._last_seen: OrderedDict[int, float] = OrderedDict()
+        self._last_warn: dict[int, float] = {}
 
     async def __call__(
         self,
-        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
         event: TelegramObject,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> Any:
         user = data.get("event_from_user")
         if user is None:
@@ -91,7 +92,7 @@ class ThrottlingMiddleware(BaseMiddleware):
 def setup_throttling(
     dispatcher: Dispatcher,
     rate_limit: float = 0.6,
-    middleware: Optional[ThrottlingMiddleware] = None,
+    middleware: ThrottlingMiddleware | None = None,
 ) -> ThrottlingMiddleware:
     """Throttling'ni message va callback_query oqimlariga ulaydi."""
     middleware = middleware or ThrottlingMiddleware(rate_limit=rate_limit)

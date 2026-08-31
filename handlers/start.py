@@ -2,14 +2,15 @@ import html
 import logging
 
 import aiohttp
-from aiogram import Router, F
-from aiogram.types import Message
-from aiogram.filters import CommandStart, Command, CommandObject
+from aiogram import F, Router
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 
+from config import ADMIN_BOT_TOKEN, ADMIN_IDS, SHOP_LINK_SECRET
 from database.db import db
-from config import ADMIN_IDS, ADMIN_BOT_TOKEN, SHOP_LINK_SECRET, is_admin_user
-from keyboards.reply import get_main_keyboard
+from keyboards.reply import get_main_keyboard, get_phone_keyboard
+from states.states import CourierApplyStates, DesignerApplyStates
 from utils.security import parse_shop_payload, verify_shop_link_token
 from utils.validators import normalize_phone, require_text
 
@@ -133,12 +134,12 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject 
         f"Bu yerda siz mahsulotlar katalogini ko'rishingiz, sotuvchi sifatida o'z do'koningizni ulab buyurtma bildirishnomalarini olishingiz mumkin.\n\n"
         f"🛒 Xaridlarni amalga oshirish uchun rasmiy <a href='https://asox.uz'>asox.uz</a> saytimizga o'ting!"
     )
-    
+
     await message.answer(welcome_text, reply_markup=get_main_keyboard(), parse_mode="HTML")
 
 @router.message(F.text == "🌐 ASOX Market sayti")
 async def process_website_btn(message: Message):
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🌐 ASOX Market saytiga o'tish", url="https://asox.uz/app")]
@@ -175,21 +176,18 @@ async def process_profile(message: Message):
 @router.message(F.text.in_(["📞 Biz bilan bog'lanish", "📞 Biz bilan aloqa", "Biz bilan bog'lanish", "Biz bilan aloqa"]))
 async def process_contact(message: Message):
     contact_text = (
-        f"📞 <b>ASOX Market Qo'llab-quvvatlash Xizmati</b>\n\n"
-        f"❓ Savollaringiz yoki takliflaringiz bormi? Biz bilan bog'laning:\n\n"
-        f"☎️ <b>Telefon:</b> +998 (77) 048-37-63\n"
-        f"💬 <b>Telegram Support:</b> @asox_support\n"
-        f"🌐 <b>Veb-sayt:</b> <a href='https://asox.uz'>asox.uz</a>\n"
-        f"📍 <b>Manzil:</b> Oʻzbekiston, Samarqand shahri, Sadaf MFY, Gagarin ko'chasi, 60"
+        "📞 <b>ASOX Market Qo'llab-quvvatlash Xizmati</b>\n\n"
+        "❓ Savollaringiz yoki takliflaringiz bormi? Biz bilan bog'laning:\n\n"
+        "☎️ <b>Telefon:</b> +998 (77) 048-37-63\n"
+        "💬 <b>Telegram Support:</b> @asox_support\n"
+        "🌐 <b>Veb-sayt:</b> <a href='https://asox.uz'>asox.uz</a>\n"
+        "📍 <b>Manzil:</b> Oʻzbekiston, Samarqand shahri, Sadaf MFY, Gagarin ko'chasi, 60"
     )
     await message.answer(contact_text, parse_mode="HTML", disable_web_page_preview=True)
 
 # ----------------------------------------------------
 # 🎨 DIZAYNER BO'LISH ARIZA OQIMI
 # ----------------------------------------------------
-from states.states import DesignerApplyStates, CourierApplyStates
-from keyboards.reply import get_phone_keyboard
-
 @router.message(F.text.in_(["🎨 Dizayner bo'lish", "Dizayner bo'lish", "🎨 Dizayner"]))
 async def designer_apply_start(message: Message, state: FSMContext):
     await state.clear()
@@ -238,7 +236,7 @@ async def designer_apply_phone(message: Message, state: FSMContext):
 
     await state.update_data(phoneNumber=phone)
     await state.set_state(DesignerApplyStates.waiting_for_specialty)
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
     spec_kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="👕 Merch & Kiyimlar"), KeyboardButton(text="📇 Poligrafiya & Vizitkalar")],
@@ -370,7 +368,7 @@ async def courier_apply_phone(message: Message, state: FSMContext):
 
     await state.update_data(phoneNumber=phone)
     await state.set_state(CourierApplyStates.waiting_for_city)
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
     city_kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📍 Samarqand shahri"), KeyboardButton(text="📍 Samarqand Poligrafiyasi")],
@@ -398,7 +396,7 @@ async def courier_apply_city(message: Message, state: FSMContext):
     city = city_raw.replace("📍", "").strip()
     await state.update_data(city=city)
     await state.set_state(CourierApplyStates.waiting_for_vehicle)
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
     veh_kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🚗 Avtomobil"), KeyboardButton(text="🛵 Skuter / Moped")],

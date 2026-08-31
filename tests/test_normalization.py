@@ -8,7 +8,7 @@ import sys
 from _harness import Results  # sys.path ni sozlaydi
 
 import config
-from database.db import Database, normalize_category, normalize_order, normalize_product
+from database.db import normalize_category, normalize_order, normalize_product
 from keyboards.inline import get_categories_keyboard, get_products_keyboard
 from utils.formatters import format_price, get_order_status_badge
 from utils.security import make_shop_link_token, parse_shop_payload, verify_shop_link_token

@@ -4,11 +4,9 @@ Ishga tushirish:  python3 tests/run_all.py
 """
 import asyncio
 import sys
-
-from _harness import Results  # sys.path ni sozlaydi
-
 from datetime import datetime
 
+from _harness import Results  # sys.path ni sozlaydi
 from aiogram import Dispatcher
 from aiogram.types import Chat, Message, User
 

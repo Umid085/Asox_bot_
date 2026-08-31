@@ -4,13 +4,12 @@ Ishga tushirish:  python3 tests/run_all.py
 """
 import asyncio
 import sys
-
-from _harness import Results  # sys.path ni sozlaydi
-
 import time
 
-import database.db as dbmod
+from _harness import Results  # sys.path ni sozlaydi
 from fake_firestore import FakeFirestore
+
+import database.db as dbmod
 
 _r = Results()
 check = _r.check
@@ -86,7 +85,7 @@ async def main():
     check("band do'kon chatId o'zgarmadi", fake.data["shops"]["shop_b"]["telegramChatId"] == "111")
     _, err3 = await db.link_shop_telegram("yoq_shop", 999, None)
     check("mavjud bo'lmagan do'kon -> not_found", err3 == "not_found")
-    shop4, err4 = await db.link_shop_telegram("shop_a", 999, "seller")
+    _, err4 = await db.link_shop_telegram("shop_a", 999, "seller")
     check("o'sha egasi qayta ulay oladi", err4 is None)
 
     print("\n[6] Event loop bloklanadimi? (har bir I/O = 120ms)")
@@ -97,7 +96,8 @@ async def main():
     async def heartbeat():
         nonlocal ticks
         while True:
-            await asyncio.sleep(0.01); ticks += 1
+            await asyncio.sleep(0.01)
+            ticks += 1
     hb = asyncio.create_task(heartbeat())
     t0 = time.perf_counter()
     await asyncio.gather(db2.get_all_orders(), db2.get_categories(), db2.get_broadcast_user_ids())

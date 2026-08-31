@@ -2,8 +2,9 @@
 import asyncio
 import sys
 
-from _harness import Results  # sys.path ni sozlaydi
-
+# _harness sys.path ga repo ildizini qo'shadi — test modullaridan OLDIN
+# import qilinishi shart (nojo'ya ta'sir uchun).
+import _harness  # noqa: F401
 import test_firestore_layer
 import test_middleware
 import test_normalization

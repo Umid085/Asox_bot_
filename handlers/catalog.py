@@ -1,13 +1,9 @@
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 
-from database.db import db, DEFAULT_PRODUCT_IMAGE
-from keyboards.inline import (
-    get_categories_keyboard,
-    get_products_keyboard,
-    get_product_detail_keyboard
-)
+from database.db import DEFAULT_PRODUCT_IMAGE, db
+from keyboards.inline import get_categories_keyboard, get_product_detail_keyboard, get_products_keyboard
 from states.states import AdminStates
 from utils.formatters import esc, format_price
 from utils.validators import require_text

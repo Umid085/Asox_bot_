@@ -1,6 +1,7 @@
 import logging
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -20,7 +21,7 @@ if not ADMIN_IDS:
     )
 
 
-def is_admin_user(user_id: int, username: str = None) -> bool:
+def is_admin_user(user_id: int, username: str | None = None) -> bool:
     """Adminlikni FAQAT raqamli Telegram ID bo'yicha tekshiradi.
 
     Ilgari bu yerda username bo'yicha tekshiruv ham bor edi va mos kelgan

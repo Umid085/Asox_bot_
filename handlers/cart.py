@@ -1,7 +1,5 @@
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import F, Router
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 router = Router()
 

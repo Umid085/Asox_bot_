@@ -57,8 +57,11 @@ ENVIRONMENT=development
 ### 2.1. Tokensiz lokal tekshirish:
 ```bash
 python3 local_tester.py --check   # konfiguratsiya, katalog, buyurtmalar
-python3 tests/run_all.py          # to'liq regressiya to'plami
+python3 tests/run_all.py          # to'liq regressiya to'plami (120 ta tekshiruv)
+ruff check .                      # linter (pip install ruff)
 ```
+Har bir push va PR da CI shu uchtasini hamda Docker image build'ini
+ishga tushiradi (`.github/workflows/ci.yml`).
 
 ### 3. Kutubxonalarni o'rnatish va Ishga tushirish:
 ```bash
@@ -135,6 +138,8 @@ telegram_bot/
 │   ├── security.py      # Do'kon havolasi HMAC imzosi
 │   └── validators.py    # Matn va telefon tekshiruvi
 ├── tests/               # Regressiya testlari (python3 tests/run_all.py)
+├── .github/workflows/   # CI: lint + testlar + Docker build
+├── pyproject.toml       # Ruff linter sozlamalari
 ├── Dockerfile           # Docker konteyner fayli
 ├── docker-compose.yml   # Docker Compose sozlamalari
 ├── render.yaml          # Render.com avto-deploy hujjati

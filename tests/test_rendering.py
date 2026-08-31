@@ -7,7 +7,6 @@ import sys
 from datetime import datetime
 
 from _harness import Results  # sys.path ni sozlaydi
-
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -77,11 +76,12 @@ async def main():
     check("to'g'ri matnda ortiqcha javob yo'q", ok_msg.replies == [])
 
     print("\n[B] Haqiqiy handlerlar rasm bilan qulaydimi?")
-    import handlers.start as start_mod
-    import handlers.admin as admin_mod
     from aiogram.fsm.context import FSMContext
     from aiogram.fsm.storage.base import StorageKey
     from aiogram.fsm.storage.memory import MemoryStorage
+
+    import handlers.admin as admin_mod
+    import handlers.start as start_mod
 
     storage = MemoryStorage()
     state = FSMContext(storage=storage, key=StorageKey(bot_id=1, chat_id=555, user_id=555))

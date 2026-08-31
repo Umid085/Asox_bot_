@@ -1,24 +1,27 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from typing import List, Dict, Any
+from typing import Any
+
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
 from utils.formatters import format_price
 
-def get_categories_keyboard(categories: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+
+def get_categories_keyboard(categories: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons = []
     for cat in categories:
         icon = cat.get('icon') or "🛍"
         name = cat.get('name') or "Kategoriya"
         buttons.append([InlineKeyboardButton(text=f"{icon} {name}", callback_data=f"cat:{cat.get('id', '')}")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_products_keyboard(products: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+def get_products_keyboard(products: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     """Mahsulotlar ro'yxati. Ortga tugmasi doim kategoriyalar menyusiga qaytaradi."""
     buttons = []
     for p in products:
         price_str = format_price(p.get('price', 0))
         name = p.get('name') or "Mahsulot"
         buttons.append([InlineKeyboardButton(text=f"{name} - {price_str}", callback_data=f"prod:{p.get('id', '')}")])
-    
+
     buttons.append([InlineKeyboardButton(text="⬅️ Kategoriyalarga qaytish", callback_data="back_to_categories")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
