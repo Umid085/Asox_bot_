@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -11,7 +14,13 @@ from utils.formatters import format_price, get_order_status_badge
 from aiogram.filters import CommandStart, Command
 from keyboards.reply import get_admin_keyboard
 
+logger = logging.getLogger(__name__)
+
 router = Router()
+
+# Telegram limiti ~30 xabar/sekund. 20/s bilan ishlaymiz — bot bloklanmasin.
+BROADCAST_DELAY_SECONDS = 0.05
+BROADCAST_PROGRESS_EVERY = 25
 
 def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -272,26 +281,45 @@ async def process_broadcast_message(message: Message, state: FSMContext, bot: Bo
         await message.answer("❌ Xabar tarqatish bekor qilindi.")
         return
 
-    users = db._users.keys()
+    # Auditoriya Firestore `bot_users` dan olinadi — xotiradagi ro'yxat
+    # bot qayta ishga tushganda bo'shab qolardi.
+    users = await db.get_broadcast_user_ids()
+    await state.clear()
+
+    if not users:
+        await message.answer("⚠️ Xabar tarqatish uchun foydalanuvchilar ro'yxati bo'sh.")
+        return
+
     count_success = 0
     count_fail = 0
+    total = len(users)
+    status_msg = await message.answer(f"⏳ Xabar yuborilmoqda... (0/{total})")
 
-    status_msg = await message.answer("⏳ Xabar yuborilmoqda...")
-
-    for user_id in list(users):
+    for index, user_id in enumerate(users, 1):
         try:
             await message.copy_to(chat_id=user_id)
             count_success += 1
         except Exception:
             count_fail += 1
+        # Telegram flood limitiga urilmaslik uchun
+        await asyncio.sleep(BROADCAST_DELAY_SECONDS)
+        if index % BROADCAST_PROGRESS_EVERY == 0:
+            try:
+                await status_msg.edit_text(f"⏳ Xabar yuborilmoqda... ({index}/{total})")
+            except Exception:
+                pass
 
-    await state.clear()
-    await status_msg.edit_text(
-        f"✅ **Xabarnoma yakunlandi!**\n\n"
-        f"🟢 Yuborildi: {count_success} ta\n"
-        f"🔴 Xatolik (Bloklangan): {count_fail} ta",
-        parse_mode="Markdown"
-    )
+    logger.info("Broadcast yakunlandi: %s ta yuborildi, %s ta xato", count_success, count_fail)
+    try:
+        await status_msg.edit_text(
+            f"✅ **Xabarnoma yakunlandi!**\n\n"
+            f"👥 Auditoriya: {total} ta\n"
+            f"🟢 Yuborildi: {count_success} ta\n"
+            f"🔴 Xatolik (Bloklangan): {count_fail} ta",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
 
 # 🎨 Dizaynerlar arizalari
 @router.message(F.text == "🎨 Dizaynerlar arizalari")
@@ -380,6 +408,10 @@ async def admin_view_couriers_handler(event: Message | CallbackQuery):
 # Action callbacks
 @router.callback_query(F.data.startswith("appr_des_"))
 async def approve_designer_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("appr_des_", "")
     await db.update_designer_request_status(req_id, "approved")
     await callback.message.edit_text(callback.message.html_text + "\n\n✅ <b>Dizayner arizasi tasdiqlandi!</b>", parse_mode="HTML")
@@ -387,6 +419,10 @@ async def approve_designer_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("rejc_des_"))
 async def reject_designer_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("rejc_des_", "")
     await db.update_designer_request_status(req_id, "rejected")
     await callback.message.edit_text(callback.message.html_text + "\n\n❌ <b>Ariza rad etildi.</b>", parse_mode="HTML")
@@ -394,6 +430,10 @@ async def reject_designer_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("appr_cou_"))
 async def approve_courier_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("appr_cou_", "")
     await db.update_courier_request_status(req_id, "approved")
     await callback.message.edit_text(callback.message.html_text + "\n\n✅ <b>Kuryer arizasi tasdiqlandi!</b>", parse_mode="HTML")
@@ -401,6 +441,10 @@ async def approve_courier_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("rejc_cou_"))
 async def reject_courier_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("rejc_cou_", "")
     await db.update_courier_request_status(req_id, "rejected")
     await callback.message.edit_text(callback.message.html_text + "\n\n❌ <b>Ariza rad etildi.</b>", parse_mode="HTML")

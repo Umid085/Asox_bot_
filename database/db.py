@@ -33,6 +33,28 @@ except Exception as _e:
     )
 
 
+
+try:  # firebase-admin >= 6.2 / google-cloud-firestore >= 2.11
+    from google.cloud.firestore_v1.base_query import FieldFilter as _FieldFilter
+except Exception:  # pragma: no cover - eski kutubxona versiyalari
+    _FieldFilter = None
+
+
+def _where(collection, field: str, op: str, value: Any):
+    """`where()` ning eskirgan pozitsion shaklidan qochadi."""
+    if _FieldFilter is not None:
+        return collection.where(filter=_FieldFilter(field, op, value))
+    return collection.where(field, op, value)
+
+
+async def _in_thread(fn, *args, **kwargs):
+    """Sinxron (bloklovchi) Firestore chaqiruvini alohida oqimda bajaradi.
+
+    `firebase-admin` sinxron SDK — uni to'g'ridan-to'g'ri `async def` ichida
+    chaqirish har bir so'rovda butun botni (ikkala pollingni ham) muzlatardi.
+    """
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
 # ----------------------------------------------------------------------------
 # Normalizatsiya: Firestore hujjatlari va xotiradagi namunalar bir xil kalitlar
 # to'plamiga keltiriladi, shunda handlerlar KeyError bilan qulamaydi.
@@ -237,7 +259,20 @@ SAMPLE_PRODUCTS = [
     }
 ]
 
+ORDERS_PAGE_SIZE = 50
+
+
 class Database:
+    """ASOX Market ma'lumotlar qatlami.
+
+    Firestore ulangan bo'lsa — u yagona haqiqat manbai (single source of truth).
+    Ulanmagan bo'lsa, bot xotiradagi namuna ma'lumotlar bilan ishlashda davom
+    etadi, lekin bu holat endi logga aniq yozib qo'yiladi.
+
+    Barcha Firestore chaqiruvlari `_in_thread()` orqali alohida oqimda
+    bajariladi — event loop bloklanmaydi.
+    """
+
     def __init__(self):
         self._categories: List[Dict[str, Any]] = [normalize_category(c) for c in CATEGORIES]
         self._products: List[Dict[str, Any]] = [normalize_product(p) for p in SAMPLE_PRODUCTS]
@@ -246,13 +281,17 @@ class Database:
         self._orders: List[Dict[str, Any]] = []
         self._lock = asyncio.Lock()
 
+    # ------------------------------------------------------------------
+    # Kategoriyalar
+    # ------------------------------------------------------------------
+    def _sync_get_categories(self) -> List[Dict[str, Any]]:
+        docs = _where(_db_client.collection("categories"), "isActive", "==", True).stream()
+        return [normalize_category(d.to_dict(), d.id) for d in docs]
+
     async def get_categories(self) -> List[Dict[str, Any]]:
         if _db_client:
             try:
-                cats = []
-                docs = _db_client.collection("categories").where("isActive", "==", True).stream()
-                for d in docs:
-                    cats.append(normalize_category(d.to_dict(), d.id))
+                cats = await _in_thread(self._sync_get_categories)
                 if cats:
                     return cats
             except Exception as e:
@@ -266,17 +305,24 @@ class Database:
                 return cat
         return None
 
+    # ------------------------------------------------------------------
+    # Mahsulotlar
+    # ------------------------------------------------------------------
+    def _sync_active_products(self, limit: int = 200) -> List[Any]:
+        query = _where(_db_client.collection("products"), "isActive", "==", True).limit(limit)
+        return list(query.stream())
+
     async def get_products_by_category(self, cat_id: str) -> List[Dict[str, Any]]:
         if _db_client:
             try:
+                docs = await _in_thread(self._sync_active_products)
                 products = []
-                docs = _db_client.collection("products").where("isActive", "==", True).limit(50).stream()
+                cat_id_clean = cat_id.lower().replace("cat_", "")
                 for d in docs:
                     data = d.to_dict() or {}
                     if data.get("isDeleted") is True:
                         continue
                     cat = (data.get("category") or "").lower()
-                    cat_id_clean = cat_id.lower().replace("cat_", "")
                     if cat_id_clean in cat or cat_id == data.get("category"):
                         products.append(normalize_product(data, d.id, cat_id))
                 if products:
@@ -285,10 +331,13 @@ class Database:
                 logger.warning("Mahsulotlarni Firestore'dan olishda xato: %s", e)
         return [p for p in self._products if p["category_id"] == cat_id]
 
+    def _sync_get_product(self, product_id: str):
+        return _db_client.collection("products").document(product_id).get()
+
     async def get_product_by_id(self, product_id: str) -> Optional[Dict[str, Any]]:
         if _db_client:
             try:
-                doc = _db_client.collection("products").document(product_id).get()
+                doc = await _in_thread(self._sync_get_product, product_id)
                 if doc.exists:
                     return normalize_product(doc.to_dict(), doc.id)
             except Exception as e:
@@ -304,7 +353,7 @@ class Database:
         firestore_ok = False
         if _db_client:
             try:
-                docs = _db_client.collection("products").where("isActive", "==", True).limit(50).stream()
+                docs = await _in_thread(self._sync_active_products)
                 for d in docs:
                     data = d.to_dict() or {}
                     if data.get("isDeleted") is True:
@@ -321,16 +370,53 @@ class Database:
             if q in str(p.get("name", "")).lower() or q in str(p.get("description", "")).lower()
         ]
 
+    def _sync_add_product(self, product: Dict[str, Any]) -> str:
+        doc_ref = _db_client.collection("products").document()
+        doc_ref.set({
+            "name": product["name"],
+            "description": product["description"],
+            "price": product["price"],
+            "effectivePrice": product["price"],
+            "category": product["category_id"],
+            "images": [product["image_url"]] if product.get("image_url") else [],
+            "isActive": True,
+            "isDeleted": False,
+            "source": "telegram_admin_bot",
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        })
+        return doc_ref.id
+
     async def add_product(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Yangi mahsulot qo'shadi. Firestore ulangan bo'lsa — saytda ham ko'rinadi."""
+        product = normalize_product(product_data)
+        product["rating"] = product.get("rating") or 5.0
+        product["in_stock"] = True
+
+        if _db_client:
+            try:
+                doc_id = await _in_thread(self._sync_add_product, product)
+                product["id"] = doc_id
+                logger.info("Yangi mahsulot Firestore'ga qo'shildi: %s", doc_id)
+                return product
+            except Exception as e:
+                logger.error("Mahsulotni Firestore'ga yozib bo'lmadi: %s", e)
+
         async with self._lock:
-            product_id = f"prod_{len(self._products) + 1}"
-            product = normalize_product(product_data, product_id)
-            product["rating"] = product.get("rating") or 5.0
-            product["in_stock"] = True
+            product["id"] = f"prod_{len(self._products) + 1}"
             self._products.append(product)
             return product
 
-    # User Management
+    # ------------------------------------------------------------------
+    # Foydalanuvchilar
+    # ------------------------------------------------------------------
+    def _sync_touch_bot_user(self, user_id: int, username: str, full_name: str) -> None:
+        _db_client.collection("bot_users").document(str(user_id)).set({
+            "telegramId": user_id,
+            "username": username or "",
+            "fullName": full_name or "",
+            "lastSeenAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+
     async def get_or_create_user(self, user_id: int, username: Optional[str] = None, full_name: Optional[str] = None) -> Dict[str, Any]:
         async with self._lock:
             if user_id not in self._users:
@@ -346,42 +432,69 @@ class Database:
                     self._users[user_id]["username"] = username
                 if full_name:
                     self._users[user_id]["full_name"] = full_name
+            user = self._users[user_id]
 
-            # Broadcast auditoriyasi: admin bot shu ro'yxatga e'lon yuboradi
-            if _db_client:
-                try:
-                    _db_client.collection("bot_users").document(str(user_id)).set({
-                        "telegramId": user_id,
-                        "username": username or "",
-                        "fullName": full_name or "",
-                        "lastSeenAt": firestore.SERVER_TIMESTAMP,
-                    }, merge=True)
-                except Exception as e:
-                    logger.warning("bot_users yozuvida xato (%s): %s", user_id, e)
+        # Broadcast auditoriyasi: `bot_users` kolleksiyasi qayta ishga tushirishdan
+        # keyin ham saqlanadi (xotiradagi ro'yxat esa yo'qoladi).
+        if _db_client:
+            try:
+                await _in_thread(self._sync_touch_bot_user, user_id, username, full_name)
+            except Exception as e:
+                logger.warning("bot_users yozuvida xato (%s): %s", user_id, e)
 
-            return self._users[user_id]
+        return user
 
     async def update_user_phone(self, user_id: int, phone: str):
         async with self._lock:
             if user_id in self._users:
                 self._users[user_id]["phone_number"] = phone
 
-    async def get_users_count(self) -> int:
-        return len(self._users)
+    def _sync_bot_user_ids(self) -> List[int]:
+        collection = _db_client.collection("bot_users")
+        try:  # faqat hujjat ID lari kerak — trafikni tejaymiz
+            docs = collection.select([]).stream()
+        except Exception:
+            docs = collection.stream()
+        ids = []
+        for d in docs:
+            try:
+                ids.append(int(d.id))
+            except (TypeError, ValueError):
+                continue
+        return ids
 
-    # Cart Management
+    async def get_broadcast_user_ids(self) -> List[int]:
+        """Xabar tarqatish auditoriyasi — Firestore `bot_users` dan.
+
+        Ilgari bu `db._users` (xotira) dan olinardi va har qayta ishga
+        tushirishdan keyin bo'shab qolardi.
+        """
+        if _db_client:
+            try:
+                ids = await _in_thread(self._sync_bot_user_ids)
+                if ids:
+                    return ids
+            except Exception as e:
+                logger.error("bot_users ro'yxatini olishda xato: %s", e)
+        return list(self._users.keys())
+
+    async def get_users_count(self) -> int:
+        return len(await self.get_broadcast_user_ids())
+
+    # ------------------------------------------------------------------
+    # Savat
+    # ------------------------------------------------------------------
     async def get_cart(self, user_id: int) -> List[Dict[str, Any]]:
         async with self._lock:
-            items = self._carts.get(user_id, [])
-            result = []
-            for item in items:
-                prod = await self.get_product_by_id(item["product_id"])
-                if prod:
-                    result.append({
-                        "product": prod,
-                        "quantity": item["quantity"]
-                    })
-            return result
+            items = list(self._carts.get(user_id, []))
+        # Mahsulotlarni qulf USTIDA emas, tashqarisida olamiz — Firestore
+        # so'rovi qulfni uzoq ushlab turmasligi uchun.
+        result = []
+        for item in items:
+            prod = await self.get_product_by_id(item["product_id"])
+            if prod:
+                result.append({"product": prod, "quantity": item["quantity"]})
+        return result
 
     async def add_to_cart(self, user_id: int, product_id: str, quantity: int = 1):
         async with self._lock:
@@ -412,7 +525,15 @@ class Database:
         async with self._lock:
             self._carts[user_id] = []
 
-    # Order Management
+    # ------------------------------------------------------------------
+    # Buyurtmalar
+    # ------------------------------------------------------------------
+    def _sync_create_order(self, order_id: str, payload: Dict[str, Any]) -> None:
+        _db_client.collection("orders").document(order_id).set({
+            **payload,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        })
+
     async def create_order(
         self,
         user_id: int,
@@ -444,49 +565,125 @@ class Database:
                 "source": "telegram_bot",
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
-
-            if _db_client:
-                try:
-                    _db_client.collection("orders").document(order_id).set({
-                        **firestore_payload,
-                        "createdAt": firestore.SERVER_TIMESTAMP,
-                    })
-                except Exception as e:
-                    logger.error("Buyurtma %s ni Firestore'ga yozib bo'lmadi: %s", order_id, e)
-
-            # Bot ichida esa yagona snake_case sxema ishlatiladi
             order = normalize_order(firestore_payload)
             self._orders.append(order)
             self._carts[user_id] = []
-            return order
+
+        if _db_client:
+            try:
+                await _in_thread(self._sync_create_order, order_id, firestore_payload)
+            except Exception as e:
+                logger.error("Buyurtma %s ni Firestore'ga yozib bo'lmadi: %s", order_id, e)
+
+        return order
+
+    def _sync_orders_by_user(self, user_id: int) -> List[Dict[str, Any]]:
+        # `where` + `order_by` birgalikda composite index talab qiladi, shuning
+        # uchun saralashni Python tomonida bajaramiz.
+        docs = _where(
+            _db_client.collection("orders"), "telegramUserId", "==", user_id
+        ).limit(ORDERS_PAGE_SIZE).stream()
+        return [normalize_order({**(d.to_dict() or {}), "id": d.id}) for d in docs]
 
     async def get_user_orders(self, user_id: int) -> List[Dict[str, Any]]:
+        if _db_client:
+            try:
+                orders = await _in_thread(self._sync_orders_by_user, user_id)
+                if orders:
+                    orders.sort(key=lambda o: o.get("created_at") or "", reverse=True)
+                    return orders
+            except Exception as e:
+                logger.warning("Foydalanuvchi %s buyurtmalarini olishda xato: %s", user_id, e)
         return [normalize_order(o) for o in self._orders if o.get("user_id") == user_id]
 
+    def _sync_all_orders(self) -> List[Dict[str, Any]]:
+        docs = (
+            _db_client.collection("orders")
+            .order_by("createdAt", direction=firestore.Query.DESCENDING)
+            .limit(ORDERS_PAGE_SIZE)
+            .stream()
+        )
+        return [normalize_order({**(d.to_dict() or {}), "id": d.id}) for d in docs]
+
     async def get_all_orders(self) -> List[Dict[str, Any]]:
+        """Barcha buyurtmalar — sayt orqali tushganlari ham shu yerda ko'rinadi."""
+        if _db_client:
+            try:
+                orders = await _in_thread(self._sync_all_orders)
+                if orders:
+                    return orders
+            except Exception as e:
+                logger.warning("Buyurtmalar ro'yxatini olishda xato: %s", e)
         return [normalize_order(o) for o in reversed(self._orders)]
 
+    def _sync_get_order(self, order_id: str):
+        return _db_client.collection("orders").document(order_id).get()
+
     async def get_order_by_id(self, order_id: str) -> Optional[Dict[str, Any]]:
+        if _db_client:
+            try:
+                doc = await _in_thread(self._sync_get_order, order_id)
+                if doc.exists:
+                    return normalize_order({**(doc.to_dict() or {}), "id": doc.id})
+            except Exception as e:
+                logger.warning("Buyurtma %s ni olishda xato: %s", order_id, e)
         for o in self._orders:
             if o.get("id") == order_id:
                 return normalize_order(o)
         return None
 
+    def _sync_update_order_status(self, order_id: str, new_status: str) -> bool:
+        doc_ref = _db_client.collection("orders").document(order_id)
+        if not doc_ref.get().exists:
+            return False
+        doc_ref.update({"status": new_status, "updatedAt": firestore.SERVER_TIMESTAMP})
+        return True
+
     async def update_order_status(self, order_id: str, new_status: str) -> bool:
+        """Statusni yangilaydi — sayt orqali tushgan buyurtmalar uchun ham ishlaydi."""
+        updated = False
+        if _db_client:
+            try:
+                updated = await _in_thread(self._sync_update_order_status, order_id, new_status)
+            except Exception as e:
+                logger.error("Buyurtma %s statusini yangilashda xato: %s", order_id, e)
+
         async with self._lock:
             for o in self._orders:
                 if o.get("id") == order_id:
                     o["status"] = new_status
-                    if _db_client:
-                        try:
-                            _db_client.collection("orders").document(order_id).update({
-                                "status": new_status,
-                                "updatedAt": firestore.SERVER_TIMESTAMP
-                            })
-                        except Exception as e:
-                            logger.error("Buyurtma %s statusini yangilashda xato: %s", order_id, e)
-                    return True
-            return False
+                    updated = True
+                    break
+        return updated
+
+    # ------------------------------------------------------------------
+    # Do'konlar
+    # ------------------------------------------------------------------
+    def _sync_link_shop(
+        self, shop_id: str, telegram_chat_id: int, telegram_username: Optional[str]
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        doc_ref = _db_client.collection("shops").document(shop_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return None, "not_found"
+
+        data = doc.to_dict() or {}
+        existing = str(data.get("telegramChatId") or "").strip()
+        if existing and existing != str(telegram_chat_id):
+            logger.warning(
+                "Do'kon %s allaqachon %s chatiga bog'langan; %s so'rovi rad etildi",
+                shop_id, existing, telegram_chat_id,
+            )
+            return None, "already_linked"
+
+        doc_ref.update({
+            "telegramChatId": str(telegram_chat_id),
+            "telegramUsername": telegram_username or "",
+            "telegramLinkedAt": firestore.SERVER_TIMESTAMP
+        })
+        data["id"] = doc.id
+        data["telegramChatId"] = str(telegram_chat_id)
+        return data, None
 
     async def link_shop_telegram(
         self,
@@ -506,65 +703,51 @@ class Database:
         if not _db_client:
             return None, "no_db"
         try:
-            doc_ref = _db_client.collection("shops").document(shop_id)
-            doc = doc_ref.get()
-            if not doc.exists:
-                return None, "not_found"
-
-            data = doc.to_dict() or {}
-            existing = str(data.get("telegramChatId") or "").strip()
-            if existing and existing != str(telegram_chat_id):
-                logger.warning(
-                    "Do'kon %s allaqachon %s chatiga bog'langan; %s so'rovi rad etildi",
-                    shop_id, existing, telegram_chat_id,
-                )
-                return None, "already_linked"
-
-            doc_ref.update({
-                "telegramChatId": str(telegram_chat_id),
-                "telegramUsername": telegram_username or "",
-                "telegramLinkedAt": firestore.SERVER_TIMESTAMP
-            })
-            data["id"] = doc.id
-            data["telegramChatId"] = str(telegram_chat_id)
-            return data, None
+            return await _in_thread(
+                self._sync_link_shop, shop_id, telegram_chat_id, telegram_username
+            )
         except Exception as e:
             logger.error("Do'kon %s ni ulashda xato: %s", shop_id, e)
             return None, "error"
 
+    # ------------------------------------------------------------------
+    # Dizayner / kuryer arizalari
+    # ------------------------------------------------------------------
+    def _sync_requests(self, collection: str, limit: int = 20) -> List[Dict[str, Any]]:
+        docs = (
+            _db_client.collection(collection)
+            .order_by("createdAt", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        return [{**(d.to_dict() or {}), "id": d.id} for d in docs]
+
     async def get_designer_requests(self) -> List[Dict[str, Any]]:
-        requests = []
         if _db_client:
             try:
-                docs = _db_client.collection("designer_requests").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(20).stream()
-                for d in docs:
-                    data = d.to_dict()
-                    data["id"] = d.id
-                    requests.append(data)
+                return await _in_thread(self._sync_requests, "designer_requests")
             except Exception as e:
                 logger.error("Dizayner arizalarini olishda xato: %s", e)
-        return requests
+        return []
 
     async def get_courier_requests(self) -> List[Dict[str, Any]]:
-        requests = []
         if _db_client:
             try:
-                docs = _db_client.collection("courier_requests").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(20).stream()
-                for d in docs:
-                    data = d.to_dict()
-                    data["id"] = d.id
-                    requests.append(data)
+                return await _in_thread(self._sync_requests, "courier_requests")
             except Exception as e:
                 logger.error("Kuryer arizalarini olishda xato: %s", e)
-        return requests
+        return []
+
+    def _sync_update_request(self, collection: str, req_id: str, new_status: str) -> None:
+        _db_client.collection(collection).document(req_id).update({
+            "status": new_status,
+            "updatedAt": firestore.SERVER_TIMESTAMP
+        })
 
     async def update_designer_request_status(self, req_id: str, new_status: str) -> bool:
         if _db_client:
             try:
-                _db_client.collection("designer_requests").document(req_id).update({
-                    "status": new_status,
-                    "updatedAt": firestore.SERVER_TIMESTAMP
-                })
+                await _in_thread(self._sync_update_request, "designer_requests", req_id, new_status)
                 return True
             except Exception as e:
                 logger.error("Dizayner arizasi %s ni yangilashda xato: %s", req_id, e)
@@ -573,24 +756,24 @@ class Database:
     async def update_courier_request_status(self, req_id: str, new_status: str) -> bool:
         if _db_client:
             try:
-                _db_client.collection("courier_requests").document(req_id).update({
-                    "status": new_status,
-                    "updatedAt": firestore.SERVER_TIMESTAMP
-                })
+                await _in_thread(self._sync_update_request, "courier_requests", req_id, new_status)
                 return True
             except Exception as e:
                 logger.error("Kuryer arizasi %s ni yangilashda xato: %s", req_id, e)
         return False
 
+    def _sync_add_request(self, collection: str, req_id: str, data: Dict[str, Any]) -> None:
+        _db_client.collection(collection).document(req_id).set({
+            **data,
+            "status": "pending",
+            "createdAt": firestore.SERVER_TIMESTAMP
+        })
+
     async def add_designer_request(self, data: Dict[str, Any]) -> str:
         req_id = f"des_{int(datetime.now().timestamp())}_{uuid4().hex[:6]}"
         if _db_client:
             try:
-                _db_client.collection("designer_requests").document(req_id).set({
-                    **data,
-                    "status": "pending",
-                    "createdAt": firestore.SERVER_TIMESTAMP
-                })
+                await _in_thread(self._sync_add_request, "designer_requests", req_id, data)
             except Exception as e:
                 logger.error("Dizayner arizasini yaratishda xato: %s", e)
         return req_id
@@ -599,14 +782,11 @@ class Database:
         req_id = f"cou_{int(datetime.now().timestamp())}_{uuid4().hex[:6]}"
         if _db_client:
             try:
-                _db_client.collection("courier_requests").document(req_id).set({
-                    **data,
-                    "status": "pending",
-                    "createdAt": firestore.SERVER_TIMESTAMP
-                })
+                await _in_thread(self._sync_add_request, "courier_requests", req_id, data)
             except Exception as e:
                 logger.error("Kuryer arizasini yaratishda xato: %s", e)
         return req_id
+
 
 # Global database instance
 db = Database()
