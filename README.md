@@ -9,17 +9,16 @@ Ushbu bot **ASOX Market** e-commerce platformasi uchun yaratilgan rasmiy Telegra
 ### 👤 Mijozlar uchun:
 * 🛍 **Mahsulotlar katalogi:** Kategoriyalar bo'yicha saralangan mahsulotlar ro'yxati (Rasm, Narx, Tavsif).
 * 🔍 **Mahsulotlar qidiruvi:** Kalit so'zlar bo'yicha mahsulotlarni izlash.
-* 🛒 **Interaktiv Savat (Cart):** Mahsulot miqdorini oshirish `➕`, kamaytirish `➖`, o'chirish `❌` va tozalash.
-* 📦 **Buyurtma berish (Checkout):** 
-  * Telefon raqamini ulashish (Telegram tugmasi yoki matn)
-  * Yetkazib berish manzilini ulashish (Telegram Geolokatsiya yoki matn)
-  * To'lov turini tanlash (Naqd pul, Click, Payme)
-* 📦 **Mening Buyurtmalarim:** Buyurtmalar tarixi va ularning joriy holatini kuzatish (Yangi, Jarayonda, Yetkazilmoqda, Bajarildi, Bekor qilindi).
+* 🛒 **Xarid:** savat, to'lov va buyurtma berish to'liq [asox.uz](https://asox.uz/app) saytida amalga oshiriladi — bot foydalanuvchini o'sha yerga yo'naltiradi.
+* 🎨 **Dizayner bo'lish arizasi:** ism, telefon, yo'nalish va portfolio havolasi.
+* 🛵 **Kuryer bo'lish arizasi:** ism, telefon, hudud va transport turi.
+* 🏪 **Sotuvchi do'konini ulash:** imzolangan `/start shop_<id>_<imzo>` havolasi orqali; ulangach do'konga tushgan buyurtmalar Telegramga keladi.
 * 👤 **Foydalanuvchi profili va Qo'llab-quvvatlash (Support).**
 
 ### ⚙️ Adminlar uchun (Admin Panel):
 * 📊 **Tizim statistikasi:** Jami foydalanuvchilar, buyurtmalar soni va jami tushum.
-* 📦 **Buyurtmalarni boshqarish:** Yangi buyurtmalardan tezkor ogohlantirish (Notification) va holatini 1 bosishda o'zgartirish.
+* 📦 **Buyurtmalarni boshqarish:** Sayt va bot orqali tushgan barcha buyurtmalar ro'yxati; holatini 1 bosishda o'zgartirish.
+* 🎨🛵 **Dizayner va kuryer arizalarini** ko'rish, tasdiqlash yoki rad etish.
 * ➕ **Yangi mahsulot qo'shish:** Bot orqali yangi mahsulot nomini, narxini va tavsifini kiritish.
 * 📢 **Broadcast (Xabarnoma):** Barcha bot foydalanuvchilariga e'lon yoki aksiya xabarlarini yuborish.
 
@@ -92,16 +91,16 @@ telegram_bot/
 │   ├── start.py
 │   ├── catalog.py
 │   ├── cart.py
-│   ├── checkout.py
-│   ├── orders.py
 │   └── admin.py
 ├── keyboards/           # Tugmalar va menyular (Reply va Inline)
 │   ├── reply.py
 │   └── inline.py
 ├── states/              # FSM holatlari (Checkout & Admin)
 │   └── states.py
-├── utils/               # Narxlarni formatlash va yordamchi funksiyalar
-│   └── formatters.py
+├── utils/               # Yordamchi funksiyalar
+│   ├── formatters.py    # Narx va status formatlash
+│   └── security.py      # Do'kon havolasi HMAC imzosi
+├── tests/               # Regressiya testlari (python3 tests/run_all.py)
 ├── Dockerfile           # Docker konteyner fayli
 ├── docker-compose.yml   # Docker Compose sozlamalari
 ├── render.yaml          # Render.com avto-deploy hujjati

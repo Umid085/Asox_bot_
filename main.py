@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN, ADMIN_BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_PATH, PORT, ENVIRONMENT
-from handlers import start, catalog, cart, checkout, orders, admin
+from handlers import start, catalog, cart, admin
 
 # Setup logging
 logging.basicConfig(

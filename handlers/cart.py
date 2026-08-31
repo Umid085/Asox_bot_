@@ -34,14 +34,17 @@ async def view_cart_cb(callback: CallbackQuery):
 async def add_to_cart_cb(callback: CallbackQuery):
     await callback.answer("Mahsulotlarni https://asox.uz sayti orqali xarid qilishingiz mumkin.", show_alert=True)
 
-# Eski savat callbacklari (cart_inc / cart_dec / cart_del / clear_cart) endi
-# ishlatilmaydi — xarid oqimi to'liq asox.uz saytiga ko'chirilgan.
+# Eski savat/checkout callbacklari (cart_inc / cart_dec / cart_del / clear_cart /
+# cancel_checkout / pay:*) endi ishlatilmaydi — xarid oqimi to'liq asox.uz
+# saytiga ko'chirilgan va handlers/checkout.py o'chirilgan.
 # Eski xabarlardagi tugmalar bosilsa, foydalanuvchini saytga yo'naltiramiz.
 @router.callback_query(
     F.data.startswith("cart_inc:")
     | F.data.startswith("cart_dec:")
     | F.data.startswith("cart_del:")
+    | F.data.startswith("pay:")
     | (F.data == "clear_cart")
+    | (F.data == "cancel_checkout")
 )
 async def legacy_cart_cb(callback: CallbackQuery):
     await callback.message.answer(
