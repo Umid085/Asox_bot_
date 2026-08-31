@@ -9,7 +9,7 @@ Kuryerlar Flutter ilovasiga kirmaydi — butun ish shu yerda.
 import html
 import logging
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import BOT_TOKEN
@@ -152,3 +152,108 @@ async def courier_take_cb(callback: CallbackQuery):
 
     await _close_other_offers(order, chat_id, courier.get("fullName"))
     logger.info("Zakas %s kuryer %s ga biriktirildi", order_id, chat_id)
+
+
+def build_progress_text(order: dict, stage: str) -> str:
+    """Kuryerning zakas kartochkasi — bosqichga qarab."""
+    number = _esc(order.get("orderNumber") or order.get("id"))
+    if stage == "picked_up":
+        return (
+            f"🛵 <b>Zakas #{number} — yo'lda</b>\n\n"
+            f"🏁 <b>Manzil:</b> {_esc(order.get('address') or order.get('deliveryAddress'))}\n"
+            f"📞 <b>Tel:</b>    <code>{_esc(order.get('customerPhone') or order.get('phone'))}</code>\n\n"
+            "Yetkazgach pastdagi tugmani bosing."
+        )
+    return (
+        f"✅ <b>Zakas #{number} yetkazildi!</b>\n\n"
+        f"💰 Sizning ulushingiz: <b>{_fmt_sum(order.get('courierFee'))} so'm</b>\n"
+        "Rahmat! Yangi zakaslar shu yerga keladi."
+    )
+
+
+def _done_keyboard(order_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Yetkazdim", callback_data=f"cour_done:{order_id}")
+    ]])
+
+
+# Kuryer tugmasi bosilganda mijozga ketadigan xabarlar. Mijozning Telegram
+# ID si faqat botdan tushgan buyurtmalarda bor — saytdan tushganida yo'q,
+# shuning uchun yuborish urinishi jimgina o'tkazib yuboriladi.
+_CUSTOMER_TEXT = {
+    "picked_up": (
+        "🛵 <b>Kuryer yo'lga chiqdi!</b>\n\n"
+        "Buyurtmangiz yetkazib berilmoqda."
+    ),
+    "delivered": (
+        "✅ <b>Buyurtmangiz yetkazildi!</b>\n\n"
+        "Xaridingiz uchun rahmat. ASOX Market 💜"
+    ),
+}
+
+
+async def _notify_customer(bot: Bot, order: dict, stage: str) -> None:
+    chat_id = order.get("telegramUserId") or order.get("user_id")
+    if not chat_id:
+        return
+    try:
+        await bot.send_message(
+            chat_id=chat_id, text=_CUSTOMER_TEXT[stage], parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.info("Mijozga (%s) xabar bormadi: %s", chat_id, e)
+
+
+async def _advance(
+    callback: CallbackQuery,
+    bot: Bot,
+    expected: str,
+    courier_status: str,
+    order_status: str,
+    keyboard: InlineKeyboardMarkup | None,
+) -> None:
+    """`cour_pick` va `cour_done` uchun umumiy oqim."""
+    order_id = callback.data.split(":", 1)[1]
+    courier_id = str(callback.from_user.id)
+
+    result = await db.advance_courier_order(
+        order_id, courier_id, expected, courier_status, order_status
+    )
+
+    if result == "not_yours":
+        await callback.answer("⛔️ Bu zakas sizga biriktirilmagan.", show_alert=True)
+        return
+    if result == "wrong_state":
+        await callback.answer("ℹ️ Bu bosqich allaqachon bajarilgan.", show_alert=True)
+        return
+    if result != "ok":
+        await callback.answer("❌ Zakas topilmadi.", show_alert=True)
+        return
+
+    order = await db.get_order_raw(order_id) or {}
+    await callback.message.edit_text(
+        build_progress_text(order, courier_status),
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+    await _notify_customer(bot, order, courier_status)
+    logger.info("Zakas %s -> %s (kuryer %s)", order_id, courier_status, courier_id)
+
+
+@router.callback_query(F.data.startswith("cour_pick:"))
+async def courier_pick_cb(callback: CallbackQuery, bot: Bot):
+    await _advance(
+        callback, bot,
+        expected="accepted", courier_status="picked_up", order_status="shipped",
+        keyboard=_done_keyboard(callback.data.split(":", 1)[1]),
+    )
+
+
+@router.callback_query(F.data.startswith("cour_done:"))
+async def courier_done_cb(callback: CallbackQuery, bot: Bot):
+    await _advance(
+        callback, bot,
+        expected="picked_up", courier_status="delivered", order_status="delivered",
+        keyboard=None,
+    )

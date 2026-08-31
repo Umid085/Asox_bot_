@@ -166,6 +166,14 @@ async def main():
     taken = build_taken_text("1042", "Otabek")
     check("yutqazganga g'olib ismi ko'rinadi", "Otabek" in taken and "1042" in taken)
 
+    print("\n[6] Bosqich matnlari")
+    from handlers.courier import build_progress_text
+
+    picked = build_progress_text({"orderNumber": "1042", "address": "Gagarin 45"}, "picked_up")
+    check("olib ketildi matni", "1042" in picked and "yo'lda" in picked.lower())
+    done = build_progress_text({"orderNumber": "1042", "courierFee": 24600}, "delivered")
+    check("yetkazildi matni", "24 600" in done)
+
     return _r.summary("Natija")
 
 
