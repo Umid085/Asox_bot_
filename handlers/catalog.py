@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from database.db import db
+from database.db import db, DEFAULT_PRODUCT_IMAGE
 from keyboards.inline import (
     get_categories_keyboard,
     get_products_keyboard,
@@ -59,21 +59,24 @@ async def show_product_detail_cb(callback: CallbackQuery):
         await callback.answer("Mahsulot topilmadi.", show_alert=True)
         return
 
-    price_fmt = format_price(product['price'])
+    price_fmt = format_price(product.get('price', 0))
+    rating = product.get('rating') or 0
+    rating_line = f"⭐ **Reyting:** {rating}/5.0\n" if rating else ""
+    description = product.get('description') or "Tavsif kiritilmagan."
     detail_text = (
-        f"📦 **{product['name']}**\n\n"
-        f"📝 **Tavsif:** {product['description']}\n"
-        f"⭐ **Reyting:** {product['rating']}/5.0\n"
+        f"📦 **{product.get('name', 'Mahsulot')}**\n\n"
+        f"📝 **Tavsif:** {description}\n"
+        f"{rating_line}"
         f"💰 **Narxi:** **{price_fmt}**\n\n"
         f"🛒 *Xarid qilish va buyurtma berish uchun quyidagi havola orqali saytga o'ting:*"
     )
 
-    kb = get_product_detail_keyboard(product['id'], product['category_id'])
+    kb = get_product_detail_keyboard(product.get('id', ''), product.get('category_id', ''))
     
     # Try sending photo if available, otherwise text
     try:
         await callback.message.answer_photo(
-            photo=product['image_url'],
+            photo=product.get('image_url') or DEFAULT_PRODUCT_IMAGE,
             caption=detail_text,
             reply_markup=kb,
             parse_mode="Markdown"

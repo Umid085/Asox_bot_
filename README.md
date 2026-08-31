@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# Asox_bot
-Asox_Market bot
-=======
 # 🤖 ASOX Market Telegram Boti
 
 Ushbu bot **ASOX Market** e-commerce platformasi uchun yaratilgan rasmiy Telegram bot hisoblanadi. Bot orqali foydalanuvchilar mahsulotlarni ko'rishlari, savatga qo'shishlari, lokatsiya va telefon raqamlarini yuborib buyurtma berishlari hamda buyurtma holatini real vaqt rejimida kuzatib borishlari mumkin.
@@ -112,4 +108,3 @@ telegram_bot/
 ├── requirements.txt     # Python kutubxonalari ro'yxati
 └── .env                 # Maxfiy kalitlar va sozlamalar
 ```
->>>>>>> 7a66a0f (feat: ASOX Market Telegram Bot implementation)

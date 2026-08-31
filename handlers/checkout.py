@@ -119,10 +119,12 @@ async def process_payment_and_finish(callback: CallbackQuery, state: FSMContext,
     await state.clear()
 
     # User confirmation message
-    items_summary = "".join(f"• {i['product']['name']} ({i['quantity']} dona)\n" for i in cart_items)
+    items_summary = "".join(
+        f"• {i.get('name', 'Tovar')} ({i.get('quantity', 1)} dona)\n" for i in order.get("items", [])
+    )
     user_confirm_text = (
         f"🎉 **Buyurtmangiz muvaffaqiyatli qabul qilindi!**\n\n"
-        f"🆔 **Buyurtma ID:** `{order['id']}`\n"
+        f"🆔 **Buyurtma ID:** `{order.get('id', '')}`\n"
         f"📦 **Mahsulotlar:**\n{items_summary}\n"
         f"💰 **Jami summa:** **{format_price(total_amount)}**\n"
         f"💳 **To'lov usuli:** {payment_method}\n"

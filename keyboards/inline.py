@@ -5,15 +5,18 @@ from utils.formatters import format_price
 def get_categories_keyboard(categories: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
     buttons = []
     for cat in categories:
-        buttons.append([InlineKeyboardButton(text=f"{cat['icon']} {cat['name']}", callback_data=f"cat:{cat['id']}")])
+        icon = cat.get('icon') or "🛍"
+        name = cat.get('name') or "Kategoriya"
+        buttons.append([InlineKeyboardButton(text=f"{icon} {name}", callback_data=f"cat:{cat.get('id', '')}")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_products_keyboard(products: List[Dict[str, Any]], cat_id: str) -> InlineKeyboardMarkup:
     buttons = []
     for p in products:
-        price_str = format_price(p['price'])
-        buttons.append([InlineKeyboardButton(text=f"{p['name']} - {price_str}", callback_data=f"prod:{p['id']}")])
+        price_str = format_price(p.get('price', 0))
+        name = p.get('name') or "Mahsulot"
+        buttons.append([InlineKeyboardButton(text=f"{name} - {price_str}", callback_data=f"prod:{p.get('id', '')}")])
     
     buttons.append([InlineKeyboardButton(text="⬅️ Kategoriyalarga qaytish", callback_data="back_to_categories")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

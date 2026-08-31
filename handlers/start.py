@@ -1,4 +1,5 @@
 import html
+import logging
 
 import aiohttp
 from aiogram import Router, F
@@ -7,9 +8,11 @@ from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.fsm.context import FSMContext
 
 from database.db import db
-from config import ADMIN_IDS, ADMIN_BOT_TOKEN, is_admin_user
+from config import ADMIN_IDS, ADMIN_BOT_TOKEN, SHOP_LINK_SECRET, is_admin_user
 from keyboards.reply import get_main_keyboard
-from utils.formatters import format_price
+from utils.security import parse_shop_payload, verify_shop_link_token
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -35,6 +38,80 @@ async def _notify_admins(text: str) -> None:
     except Exception as e:
         print(f"Error opening admin notification session: {e}")
 
+
+SHOP_LINK_ERRORS = {
+    "no_db": (
+        "⚠️ <b>Ma'lumotlar bazasi hozir mavjud emas.</b>\n"
+        "Iltimos, birozdan so'ng qayta urinib ko'ring."
+    ),
+    "not_found": (
+        "❌ <b>Bunday do'kon topilmadi.</b>\n"
+        "Havolani asox.uz kabinetingizdan qaytadan oling."
+    ),
+    "already_linked": (
+        "⛔️ <b>Bu do'kon allaqachon boshqa Telegram akkauntga bog'langan.</b>\n\n"
+        "Agar bu siz bo'lmasangiz, zudlik bilan @asox_support ga murojaat qiling."
+    ),
+    "error": (
+        "⚠️ <b>Do'konni ulashda texnik xatolik yuz berdi.</b>\n"
+        "Iltimos, keyinroq urinib ko'ring."
+    ),
+}
+
+
+async def _handle_shop_link(message: Message, payload: str, user_id: int, username: str | None) -> None:
+    """`/start shop_<id>_<imzo>` havolasini imzo bilan tekshirib do'konni ulaydi.
+
+    Imzosiz havolalar rad etiladi: aks holda do'kon ID sini bilgan har kim
+    do'konning buyurtma bildirishnomalarini (mijoz ismi, telefoni, manzili)
+    o'ziga yo'naltirib olishi mumkin edi.
+    """
+    shop_id, signature = parse_shop_payload(payload)
+
+    if not SHOP_LINK_SECRET:
+        logger.error("SHOP_LINK_SECRET sozlanmagan — do'kon ulash o'chirib qo'yildi")
+        await message.answer(
+            "⚠️ <b>Do'kon ulash xizmati vaqtincha ishlamayapti.</b>\n"
+            "Iltimos, @asox_support ga murojaat qiling.",
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    if not shop_id or not verify_shop_link_token(shop_id, signature, SHOP_LINK_SECRET):
+        logger.warning(
+            "Yaroqsiz do'kon ulash havolasi: payload=%r user_id=%s", payload, user_id
+        )
+        await message.answer(
+            "❌ <b>Havola yaroqsiz.</b>\n\n"
+            "Do'konni ulash havolasini asox.uz saytidagi sotuvchi kabinetingizdan oling.",
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    shop, error = await db.link_shop_telegram(shop_id, user_id, username)
+    if error:
+        await message.answer(
+            SHOP_LINK_ERRORS.get(error, SHOP_LINK_ERRORS["error"]),
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    shop_name = (shop.get("name") if shop else None) or shop_id
+    logger.info("Do'kon %s -> Telegram chat %s ga bog'landi", shop_id, user_id)
+    await message.answer(
+        f"✅ <b>Do'koningiz ASOX Market botiga muvaffaqiyatli ulandi!</b>\n\n"
+        f"🏪 <b>Do'kon:</b> <b>{html.escape(str(shop_name))}</b>\n"
+        f"🆔 <b>Do'kon ID:</b> <code>{html.escape(shop_id)}</code>\n"
+        f"👤 <b>Telegram ID:</b> <code>{user_id}</code>\n\n"
+        f"🔔 Endi ushbu do'konga yangi buyurtma tushganda, barcha tafsilotlar real vaqtda shu yerga yuboriladi.",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML",
+    )
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject = None):
     await state.clear()
@@ -44,22 +121,10 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject 
 
     await db.get_or_create_user(user_id, username, full_name)
 
-    # Sotuvchi do'konini ulash uchun kirgan bo'lsa: /start shop_12345
+    # Sotuvchi do'konini ulash uchun kirgan bo'lsa: /start shop_<id>_<imzo>
     if command and command.args and command.args.startswith("shop_"):
-        shop_id = command.args.replace("shop_", "").strip()
-        if shop_id:
-            shop = await db.link_shop_telegram(shop_id, user_id, username)
-            shop_name = (shop.get("name") if shop else None) or shop_id
-            await message.answer(
-                f"✅ <b>Do'koningiz ASOX Market botiga muvaffaqiyatli ulandi!</b>\n\n"
-                f"🏪 <b>Do'kon:</b> <b>{html.escape(shop_name)}</b>\n"
-                f"🆔 <b>Do'kon ID:</b> <code>{html.escape(shop_id)}</code>\n"
-                f"👤 <b>Telegram ID:</b> <code>{user_id}</code>\n\n"
-                f"🔔 Endi ushbu do'konga yangi buyurtma tushganda, barcha tafsilotlar real vaqtda shu yerga yuboriladi.",
-                reply_markup=get_main_keyboard(),
-                parse_mode="HTML"
-            )
-            return
+        await _handle_shop_link(message, command.args, user_id, username)
+        return
 
     welcome_text = (
         f"👋 <b>Xush kelibsiz, {html.escape(full_name)}!</b>\n\n"

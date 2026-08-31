@@ -76,7 +76,7 @@ async def admin_view_orders_text(message: Message):
         await message.answer("Hozircha buyurtmalar yo'q.")
         return
     for order in orders[:5]:
-        items_summary = "".join(f"• {i.get('product', {}).get('name', 'Tovar')} ({i.get('quantity', 1)}x)\n" for i in order.get("items", []))
+        items_summary = "".join(f"• {i.get('name', 'Tovar')} ({i.get('quantity', 1)}x)\n" for i in order.get("items", []))
         text = (
             f"🆔 **Order #{order.get('id', '')}** ({order.get('created_at', '')})\n"
             f"👤 **Mijoz:** {order.get('user_name', '')} (`{order.get('user_id', '')}`)\n"
@@ -117,7 +117,7 @@ async def admin_stats_cb(callback: CallbackQuery):
 
     users_count = await db.get_users_count()
     all_orders = await db.get_all_orders()
-    total_revenue = sum(o["total_amount"] for o in all_orders if o["status"] == "delivered")
+    total_revenue = sum(o.get("total_amount", 0) for o in all_orders if o.get("status") == "delivered")
 
     stats_text = (
         f"📊 **ASOX Market Statistikasi**\n\n"
@@ -140,19 +140,19 @@ async def admin_view_orders_cb(callback: CallbackQuery):
 
     await callback.answer()
     for order in orders[:5]: # Show latest 5
-        items_summary = "".join(f"• {i['product']['name']} ({i['quantity']}x)\n" for i in order["items"])
+        items_summary = "".join(f"• {i.get('name', 'Tovar')} ({i.get('quantity', 1)}x)\n" for i in order.get("items", []))
         text = (
-            f"🆔 **Order #{order['id']}** ({order['created_at']})\n"
-            f"👤 **Mijoz:** {order['user_name']} (`{order['user_id']}`)\n"
-            f"📱 **Tel:** {order['phone_number']}\n"
-            f"📍 **Manzil:** {order['address']}\n"
-            f"💰 **Summa:** {format_price(order['total_amount'])}\n"
-            f"📊 **Holati:** {get_order_status_badge(order['status'])}\n\n"
+            f"🆔 **Order #{order.get('id', '')}** ({order.get('created_at', '')})\n"
+            f"👤 **Mijoz:** {order.get('user_name', '')} (`{order.get('user_id', '')}`)\n"
+            f"📱 **Tel:** {order.get('phone_number', '')}\n"
+            f"📍 **Manzil:** {order.get('address', '')}\n"
+            f"💰 **Summa:** {format_price(order.get('total_amount', 0))}\n"
+            f"📊 **Holati:** {get_order_status_badge(order.get('status', 'pending'))}\n\n"
             f"📦 **Mahsulotlar:**\n{items_summary}"
         )
         await callback.message.answer(
             text,
-            reply_markup=get_admin_order_keyboard(order['id'], order['status']),
+            reply_markup=get_admin_order_keyboard(order.get('id', ''), order.get('status', 'pending')),
             parse_mode="Markdown"
         )
 
