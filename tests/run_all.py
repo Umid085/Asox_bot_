@@ -6,6 +6,7 @@ import sys
 # import qilinishi shart (nojo'ya ta'sir uchun).
 import _harness  # noqa: F401
 import test_admin_notifications
+import test_courier
 import test_firestore_layer
 import test_middleware
 import test_normalization
@@ -17,6 +18,7 @@ SUITES = [
     ("Render, kirish tekshiruvi, xatoliklar", test_rendering),
     ("Throttling va telefon", test_middleware),
     ("Admin bildirishnomalari", test_admin_notifications),
+    ("Kuryer dispetcheri", test_courier),
 ]
 
 def main() -> int:

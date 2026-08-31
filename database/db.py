@@ -758,5 +758,96 @@ class Database:
             return req_id, False
 
 
+
+    # ------------------------------------------------------------------
+    # Kuryerlar
+    # ------------------------------------------------------------------
+    # Hujjat ID si sifatida kuryerning Telegram chat ID si ishlatiladi:
+    # bitta Telegram akkaunt = bitta kuryer, shu sababli takroriy tasdiqlash
+    # yangi hujjat yaratmaydi, va callback kelganda couriers/{from_user.id}
+    # bo'yicha to'g'ridan-to'g'ri topiladi — qidiruv so'rovi kerak emas.
+
+    def _sync_get_doc(self, collection: str, doc_id: str) -> dict[str, Any] | None:
+        snap = _db_client.collection(collection).document(doc_id).get()
+        if not snap.exists:
+            return None
+        return {**(snap.to_dict() or {}), "id": snap.id}
+
+    def _sync_create_courier(self, courier_id: str, data: dict[str, Any]) -> None:
+        # Qayta tasdiqlashda ish tarixi yo'qolmasligi kerak: mavjud hujjatning
+        # activeOrderId va completedCount qiymatlari saqlanadi, createdAt esa
+        # qaytadan yozilmaydi.
+        doc_ref = _db_client.collection("couriers").document(courier_id)
+        existing = doc_ref.get()
+        base = {
+            "isActive": True,
+            "activeOrderId": None,
+            "completedCount": 0,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        }
+        if existing.exists:
+            current = existing.to_dict() or {}
+            base["activeOrderId"] = current.get("activeOrderId")
+            base["completedCount"] = current.get("completedCount", 0)
+            base.pop("createdAt")
+        doc_ref.set({**data, **base}, merge=True)
+
+    async def approve_courier_request(self, req_id: str) -> dict[str, Any] | None:
+        """Arizani kuryerga aylantiradi.
+
+        Tartib MUHIM: avval `couriers` hujjati yaratiladi, keyingina ariza
+        statusi `approved` ga o'tadi. Teskarisi bo'lsa hujjat yaratilmay
+        qolganda ariza "tasdiqlangan" ko'rinib turardi, kuryer esa hech
+        qachon zakas olmasdi — jimgina yo'qoladigan xatoning aynan o'zi.
+
+        Yaratilgan kuryerni (`id` maydoni bilan) yoki `None` qaytaradi.
+        """
+        if not _db_client:
+            logger.warning("Kuryer arizasi %s tasdiqlanmadi: Firestore yo'q", req_id)
+            return None
+        try:
+            req = await _in_thread(self._sync_get_doc, "courier_requests", req_id)
+            if not req:
+                logger.warning("Kuryer arizasi %s topilmadi", req_id)
+                return None
+
+            # `userId` — arizani topshirgan Telegram foydalanuvchi ID si
+            # (handlers/start.py:550 da yoziladi). Usiz kuryerga xabar
+            # yuborib bo'lmaydi, demak hujjat ham yaratilmaydi.
+            chat_id = str(req.get("userId") or "").strip()
+            if not chat_id:
+                logger.error(
+                    "Kuryer arizasi %s da userId yo'q — hujjat yaratilmadi", req_id
+                )
+                return None
+
+            courier = {
+                "fullName": req.get("fullName") or "Kuryer",
+                "phoneNumber": req.get("phoneNumber") or "",
+                "telegramChatId": chat_id,
+                "telegramUsername": req.get("telegramUsername") or "",
+                "vehicle": req.get("vehicle") or "",
+                "city": req.get("city") or "",
+                "requestId": req_id,
+            }
+            await _in_thread(self._sync_create_courier, chat_id, courier)
+            await _in_thread(
+                self._sync_update_request, "courier_requests", req_id, "approved"
+            )
+            return {**courier, "id": chat_id}
+        except Exception as e:
+            logger.error("Kuryer arizasi %s ni tasdiqlashda xato: %s", req_id, e)
+            return None
+
+    async def get_courier(self, chat_id: str | int) -> dict[str, Any] | None:
+        if not _db_client:
+            return None
+        try:
+            return await _in_thread(self._sync_get_doc, "couriers", str(chat_id))
+        except Exception as e:
+            logger.error("Kuryer %s ni olishda xato: %s", chat_id, e)
+            return None
+
+
 # Global database instance
 db = Database()

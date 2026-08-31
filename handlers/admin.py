@@ -6,12 +6,13 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from config import is_admin_user
+from config import BOT_TOKEN, is_admin_user
 from database.db import db
 from keyboards.inline import get_admin_order_keyboard, get_categories_keyboard
 from keyboards.reply import get_admin_keyboard
 from states.states import AdminStates
 from utils.formatters import esc, format_price, get_order_status_badge
+from utils.notify import send_message
 from utils.validators import require_text
 
 logger = logging.getLogger(__name__)
@@ -456,9 +457,37 @@ async def approve_courier_cb(callback: CallbackQuery):
         return
 
     req_id = callback.data.replace("appr_cou_", "")
-    await db.update_courier_request_status(req_id, "approved")
-    await callback.message.edit_text(callback.message.html_text + "\n\n✅ <b>Kuryer arizasi tasdiqlandi!</b>", parse_mode="HTML")
+    # Ilgari bu yer faqat `status` maydonini "approved" qilardi — kuryer
+    # akkaunti, roli va chat bog'lanishi yaratilmasdi, natijada tasdiqlangan
+    # kuryer hech qachon zakas olmasdi. Endi `couriers` hujjati yaratiladi.
+    courier = await db.approve_courier_request(req_id)
+
+    if courier is None:
+        # Ariza statusi ataylab o'zgartirilmadi — qayta urinib ko'rish mumkin.
+        await callback.answer(
+            "⚠️ Kuryer yaratilmadi. Arizada Telegram ID bo'lmasligi mumkin — "
+            "loglarni tekshiring.",
+            show_alert=True,
+        )
+        return
+
+    await callback.message.edit_text(
+        callback.message.html_text + "\n\n✅ <b>Kuryer arizasi tasdiqlandi!</b>",
+        parse_mode="HTML",
+    )
     await callback.answer("Kuryer tasdiqlandi!")
+
+    # Kuryerga xabar USER boti orqali ketadi: u arizani o'sha yerda topshirgan
+    # va zakas takliflari ham o'sha yerga keladi. Admin botiga yozsak kuryer
+    # umuman ko'rmaydi.
+    await send_message(
+        BOT_TOKEN,
+        courier["id"],
+        "🎉 <b>Tabriklaymiz! Kuryerlik arizangiz tasdiqlandi.</b>\n\n"
+        "Endi yangi zakaslar shu chatga keladi. Zakas ma'qul bo'lsa "
+        "<b>✅ Qabul qildim</b> tugmasini bosing — kim birinchi bossa, "
+        "zakas o'shaniki bo'ladi.",
+    )
 
 @router.callback_query(F.data.startswith("rejc_cou_"))
 async def reject_courier_cb(callback: CallbackQuery):
