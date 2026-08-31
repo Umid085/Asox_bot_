@@ -71,6 +71,79 @@ async def main():
     check("id maydoni bor", found and found["id"] == "555")
     check("noma'lum chat_id -> None", await db.get_courier("999") is None)
 
+    print("\n[2] Sof qaror mantig'i")
+    from utils.courier_claim import advance_decision, claim_decision
+
+    check("bo'sh zakas -> won", claim_decision({"courierStatus": "searching"}) == "won")
+    check("olingan zakas -> taken", claim_decision({"courierStatus": "accepted"}) == "taken")
+    check("yetkazilgan -> taken", claim_decision({"courierStatus": "delivered"}) == "taken")
+    check("courierStatus yo'q -> taken", claim_decision({}) == "taken")
+    check("zakas yo'q -> not_found", claim_decision(None) == "not_found")
+
+    ORDER = {"courierId": "555", "courierStatus": "accepted"}
+    check("o'z zakasi, to'g'ri holat -> ok",
+          advance_decision(ORDER, "555", "accepted") == "ok")
+    check("raqam/satr farqi muhim emas",
+          advance_decision(ORDER, 555, "accepted") == "ok")
+    check("begona kuryer -> not_yours",
+          advance_decision(ORDER, "777", "accepted") == "not_yours")
+    check("noto'g'ri holat -> wrong_state",
+          advance_decision(ORDER, "555", "picked_up") == "wrong_state")
+    check("zakas yo'q -> not_found",
+          advance_decision(None, "555", "accepted") == "not_found")
+
+    print("\n[3] Poyga: ikki kuryer bir zakasni olmoqchi")
+    fake.data["orders"]["ORD-1"] = {
+        "orderNumber": "1042", "courierStatus": "searching",
+        "shopId": "shop_a", "telegramUserId": 900,
+    }
+    fake.data["couriers"]["777"] = {
+        "fullName": "Jasur", "phoneNumber": "+998907654321",
+        "telegramChatId": "777", "isActive": True, "activeOrderId": None,
+        "completedCount": 0,
+    }
+    c555 = await db.get_courier("555")
+    c777 = await db.get_courier("777")
+
+    first = await db.claim_order_for_courier("ORD-1", c555)
+    second = await db.claim_order_for_courier("ORD-1", c777)
+    check("birinchi kuryer yutdi", first == "won")
+    check("ikkinchi kuryer kechikdi", second == "taken")
+
+    order = fake.data["orders"]["ORD-1"]
+    check("zakas birinchi kuryerda", order["courierId"] == "555")
+    check("ism yozildi", order["courierName"] == "Otabek Fayzullayev")
+    check("telefon yozildi", order["courierPhone"] == "+998901234567")
+    check("chat id yozildi", order["courierChatId"] == "555")
+    check("holat accepted", order["courierStatus"] == "accepted")
+    check("g'olibda activeOrderId bor",
+          fake.data["couriers"]["555"]["activeOrderId"] == "ORD-1")
+    check("yutqazganda activeOrderId bo'sh",
+          fake.data["couriers"]["777"]["activeOrderId"] is None)
+
+    check("mavjud bo'lmagan zakas -> not_found",
+          await db.claim_order_for_courier("YO-Q", c555) == "not_found")
+
+    print("\n[4] Holatni oldinga surish")
+    check("begona kuryer rad etiladi",
+          await db.advance_courier_order("ORD-1", "777", "accepted",
+                                         "picked_up", "shipped") == "not_yours")
+    check("o'z kuryeri o'tkazdi",
+          await db.advance_courier_order("ORD-1", "555", "accepted",
+                                         "picked_up", "shipped") == "ok")
+    check("courierStatus picked_up", order["courierStatus"] == "picked_up")
+    check("order status shipped", order["status"] == "shipped")
+    check("takroriy bosish rad etiladi",
+          await db.advance_courier_order("ORD-1", "555", "accepted",
+                                         "picked_up", "shipped") == "wrong_state")
+
+    check("yetkazildi",
+          await db.advance_courier_order("ORD-1", "555", "picked_up",
+                                         "delivered", "delivered") == "ok")
+    check("kuryer bo'shadi",
+          fake.data["couriers"]["555"]["activeOrderId"] is None)
+    check("hisob oshdi", fake.data["couriers"]["555"]["completedCount"] == 1)
+
     return _r.summary("Natija")
 
 

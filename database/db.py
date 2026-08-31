@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from utils.courier_claim import advance_decision, claim_decision
+
 logger = logging.getLogger(__name__)
 
 FIREBASE_PROJECT_ID = "asox-market-prod-2e4bb"
@@ -93,6 +95,16 @@ except Exception as _e:
     _db_client = None
     logger.warning("⚠️ Firestore ulanmadi: %s. %s", _e, IN_MEMORY_NOTICE)
 
+
+
+# `@firestore.transactional` bezovchisi haqiqiy SDK tranzaksiya obyektini
+# talab qiladi. Testlardagi soxta klient bunday obyektni bermaydi, shuning
+# uchun bezovchi faqat haqiqiy tranzaksiyaga qo'llanadi (`is_fake` bayrog'i).
+try:
+    from firebase_admin import firestore as _firestore_mod
+    _transactional = _firestore_mod.transactional
+except Exception:  # pragma: no cover - firebase_admin o'rnatilmagan muhit
+    _transactional = None
 
 
 try:  # firebase-admin >= 6.2 / google-cloud-firestore >= 2.11
@@ -846,6 +858,147 @@ class Database:
             return await _in_thread(self._sync_get_doc, "couriers", str(chat_id))
         except Exception as e:
             logger.error("Kuryer %s ni olishda xato: %s", chat_id, e)
+            return None
+
+
+
+    def _run_in_transaction(self, body):
+        """`body(txn)` ni tranzaksiya ichida bajaradi.
+
+        Haqiqiy klientda `@firestore.transactional` konflikt bo'lganda
+        avtomatik qayta uriniladi — aynan shu bizga kerak: ikki kuryer bir
+        vaqtda bosganda ikkinchisi yangilangan hujjatni qayta o'qiydi va
+        "taken" qarorini oladi.
+        """
+        txn = _db_client.transaction()
+        if _transactional is not None and not getattr(txn, "is_fake", False):
+            return _transactional(body)(txn)
+        return body(txn)
+
+    def _sync_claim_order(self, order_id: str, courier: dict[str, Any]) -> str:
+        order_ref = _db_client.collection("orders").document(order_id)
+        courier_id = str(courier.get("id") or courier.get("telegramChatId") or "")
+        courier_ref = _db_client.collection("couriers").document(courier_id)
+
+        def _body(txn) -> str:
+            snap = order_ref.get(transaction=txn)
+            order = snap.to_dict() if snap.exists else None
+            decision = claim_decision(order)
+            if decision != "won":
+                return decision
+            txn.update(order_ref, {
+                "courierStatus": "accepted",
+                "courierId": courier_id,
+                "courierName": courier.get("fullName") or "",
+                "courierPhone": courier.get("phoneNumber") or "",
+                "courierChatId": courier_id,
+                "courierAcceptedAt": firestore.SERVER_TIMESTAMP,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+            txn.update(courier_ref, {"activeOrderId": order_id})
+            return "won"
+
+        return self._run_in_transaction(_body)
+
+    async def claim_order_for_courier(
+        self, order_id: str, courier: dict[str, Any] | None
+    ) -> str:
+        """Zakasni kuryerga biriktiradi. `"won"` / `"taken"` / `"not_found"`.
+
+        Poyga aynan shu yerda hal bo'ladi: tranzaksiya atomik, shu sababli
+        ikkinchi bosgan kuryer qancha tez bo'lmasin, o'qiganida
+        `courierStatus` allaqachon `accepted` bo'ladi.
+        """
+        if not _db_client or not courier:
+            return "not_found"
+        try:
+            return await _in_thread(self._sync_claim_order, order_id, courier)
+        except Exception as e:
+            logger.error("Zakas %s ni biriktirishda xato: %s", order_id, e)
+            return "not_found"
+
+    def _sync_advance_order(
+        self,
+        order_id: str,
+        courier_id: str,
+        expected: str,
+        courier_status: str,
+        order_status: str,
+    ) -> str:
+        order_ref = _db_client.collection("orders").document(order_id)
+        courier_ref = _db_client.collection("couriers").document(str(courier_id))
+
+        # Holat -> yozib qo'yiladigan vaqt tamg'asi maydoni.
+        stamp_field = {
+            "picked_up": "courierPickedUpAt",
+            "delivered": "courierDeliveredAt",
+        }.get(courier_status)
+
+        def _body(txn) -> str:
+            snap = order_ref.get(transaction=txn)
+            order = snap.to_dict() if snap.exists else None
+            decision = advance_decision(order, courier_id, expected)
+            if decision != "ok":
+                return decision
+            payload = {
+                "courierStatus": courier_status,
+                "status": order_status,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }
+            if stamp_field:
+                payload[stamp_field] = firestore.SERVER_TIMESTAMP
+            txn.update(order_ref, payload)
+
+            # Yetkazilgach kuryer bo'shaydi va hisobi oshadi. Increment emas,
+            # o'qib-yozish: tranzaksiya ichida bu xavfsiz va soxta klient
+            # ham qo'llab-quvvatlaydi.
+            if courier_status == "delivered":
+                csnap = courier_ref.get(transaction=txn)
+                current = (csnap.to_dict() or {}) if csnap.exists else {}
+                txn.update(courier_ref, {
+                    "activeOrderId": None,
+                    "completedCount": int(current.get("completedCount") or 0) + 1,
+                })
+            return "ok"
+
+        return self._run_in_transaction(_body)
+
+    async def advance_courier_order(
+        self,
+        order_id: str,
+        courier_id: str | int,
+        expected: str,
+        courier_status: str,
+        order_status: str,
+    ) -> str:
+        """Zakas holatini oldinga suradi.
+
+        `"ok"` / `"not_found"` / `"not_yours"` / `"wrong_state"`.
+        """
+        if not _db_client:
+            return "not_found"
+        try:
+            return await _in_thread(
+                self._sync_advance_order, order_id, str(courier_id),
+                expected, courier_status, order_status,
+            )
+        except Exception as e:
+            logger.error("Zakas %s holatini o'zgartirishda xato: %s", order_id, e)
+            return "not_found"
+
+    async def get_order_raw(self, order_id: str) -> dict[str, Any] | None:
+        """Buyurtmaning XOM hujjati — `normalize_order()` siz.
+
+        Kuryer maydonlari (`courierStatus`, `courierOfferMessages`, ...)
+        normalizatsiyadan o'tmaydi, shu sababli ular kerak bo'lganda
+        `get_order_by_id()` emas, aynan shu metod ishlatiladi.
+        """
+        if not _db_client:
+            return None
+        try:
+            return await _in_thread(self._sync_get_doc, "orders", order_id)
+        except Exception as e:
+            logger.error("Zakas %s ni o'qishda xato: %s", order_id, e)
             return None
 
 
