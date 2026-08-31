@@ -17,6 +17,7 @@ from fake_firestore import FakeFirestore
 
 import database.db as dbmod
 import handlers.start as start_mod
+from utils.security import make_shop_link_token
 
 _r = Results()
 check = _r.check
@@ -49,6 +50,31 @@ class FakeState:
 
     async def clear(self):
         self._data = {}
+
+
+SHOP_SECRET = "test_shop_secret"
+
+
+async def _link(payload, *, shops=None, secret=SHOP_SECRET, user_id=555):
+    """`/start shop_...` oqimini bir marta ishga tushirib, admin xabarlarini qaytaradi."""
+    dbmod._db_client = FakeFirestore({"shops": shops}) if shops is not None else None
+    dbmod.db = dbmod.Database()
+
+    sent = []
+
+    async def fake_notify(text):
+        sent.append(text)
+
+    saved = (start_mod._notify_admins, start_mod.db, start_mod.SHOP_LINK_SECRET)
+    start_mod._notify_admins = fake_notify
+    start_mod.db = dbmod.db
+    start_mod.SHOP_LINK_SECRET = secret
+    try:
+        message = FakeMessage(user_id=user_id)
+        await start_mod._handle_shop_link(message, payload, user_id, "sotuvchi")
+    finally:
+        (start_mod._notify_admins, start_mod.db, start_mod.SHOP_LINK_SECRET) = saved
+    return sent, message.replies
 
 
 DESIGNER_DATA = {
@@ -118,6 +144,52 @@ async def main():
     check("bot zaxira xabar yubordi", len(sent) == 1)
     check("xabar ZAXIRA deb belgilangan", "ZAXIRA XABAR" in sent[0])
     check("ariza ma'lumotlari yo'qolmagan", "Otabek Fayzullayev" in sent[0])
+
+    print("\n[Do'kon ulash] Muvaffaqiyatli ulanish adminga xabar qilinadimi?")
+    start_mod._last_shop_link_alert.clear()
+    token = make_shop_link_token("shop_a", SHOP_SECRET)
+    sent, replies = await _link(
+        f"shop_shop_a_{token}", shops={"shop_a": {"name": "Samarqand Poligrafiya"}}
+    )
+    check("admin xabar oldi", len(sent) == 1)
+    check("do'kon nomi ko'rsatilgan", "Samarqand Poligrafiya" in sent[0])
+    check("kim ulagani ko'rsatilgan", "@sotuvchi" in sent[0] and "555" in sent[0])
+    check("sotuvchiga tasdiq berildi", any("muvaffaqiyatli ulandi" in r for r in replies))
+
+    print("\n[Do'kon ulash] BAND do'konni egallashga urinish")
+    start_mod._last_shop_link_alert.clear()
+    sent, _ = await _link(
+        f"shop_shop_a_{token}",
+        shops={"shop_a": {"name": "Band", "telegramChatId": "111"}},
+    )
+    check("admin ogohlantirildi", len(sent) == 1)
+    check("xabar bandlik haqida", "BAND DO'KONNI" in sent[0])
+    check("do'kon ID si bor", "shop_a" in sent[0])
+
+    print("\n[Do'kon ulash] Yaroqsiz imzo -> ogohlantirish + COOLDOWN")
+    start_mod._last_shop_link_alert.clear()
+    sent, _ = await _link("shop_shop_a_deadbeefdeadbeef", shops={"shop_a": {}})
+    check("birinchi soxta urinish xabar qilindi", len(sent) == 1)
+    check("xabar yaroqsizlik haqida", "YAROQSIZ" in sent[0])
+
+    total = 0
+    for _ in range(25):
+        more, _r2 = await _link("shop_shop_a_deadbeefdeadbeef", shops={"shop_a": {}})
+        total += len(more)
+    check(f"keyingi 25 ta urinish JIM o'tdi (yuborildi: {total})", total == 0)
+
+    print("\n[Do'kon ulash] Boshqa foydalanuvchi cooldown'dan ta'sirlanmaydi")
+    sent, _ = await _link(
+        "shop_shop_a_deadbeefdeadbeef", shops={"shop_a": {}}, user_id=777
+    )
+    check("boshqa user uchun ogohlantirish yuborildi", len(sent) == 1)
+
+    print("\n[Do'kon ulash] SHOP_LINK_SECRET sozlanmagan -> adminga aytiladi")
+    start_mod._last_shop_link_alert.clear()
+    sent, replies = await _link("shop_shop_a_x", shops={"shop_a": {}}, secret="")
+    check("admin ogohlantirildi", len(sent) == 1)
+    check("xabar kalit haqida", "SHOP_LINK_SECRET" in sent[0])
+    check("sotuvchiga ham tushunarli javob berildi", len(replies) == 1)
 
     print("\n[Shartnoma] add_*_request (req_id, saved) qaytaradi")
     dbmod._db_client = FakeFirestore()

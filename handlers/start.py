@@ -1,5 +1,7 @@
 import html
 import logging
+import time
+from collections import OrderedDict
 
 import aiohttp
 from aiogram import F, Router
@@ -27,9 +29,14 @@ async def _notify_admins(text: str) -> None:
     yozuviga ulangani uchun saytdan kelgan arizalarni ham qamrab oladi va
     xabari kengroq (`about` / `note` maydonlari ham bor).
 
-    Bu funksiya faqat Firestore yozuvi AMALGA OSHMAGANDA chaqiriladi: unday
-    holatda CF umuman ishga tushmaydi va ariza izsiz yo'qolardi. Ilgari u har
-    safar chaqirilardi va admin bitta arizani IKKI marta olardi.
+    Shuning uchun arizalar bo'yicha bu funksiya faqat Firestore yozuvi AMALGA
+    OSHMAGANDA chaqiriladi: unday holatda CF umuman ishga tushmaydi va ariza
+    izsiz yo'qolardi. Ilgari u har safar chaqirilardi va admin bitta arizani
+    IKKI marta olardi.
+
+    Do'kon ulash hodisalari uchun esa Cloud Functions tomonida hech qanday
+    trigger yo'q (`shops` hujjati faqat yangilanadi), shuning uchun ular shu
+    yerdan yuboriladi — `_alert_admins_throttled()` ga qarang.
     """
     if not ADMIN_BOT_TOKEN or not ADMIN_IDS:
         return
@@ -71,7 +78,47 @@ SHOP_LINK_ERRORS = {
 }
 
 
-async def _handle_shop_link(message: Message, payload: str, user_id: int, username: str | None) -> None:
+# Do'kon ulash hodisalari haqida adminlarga ogohlantirish.
+#
+# Muvaffaqiyatli ulanish va "band do'kon" urinishi HAR SAFAR yuboriladi —
+# ular kam uchraydi va yuqori signalga ega. Yaroqsiz imzo / topilmagan do'kon
+# kabi holatlar esa hujumchi tomonidan ketma-ket yuborilishi mumkin, shuning
+# uchun ular foydalanuvchi+sabab bo'yicha cooldown bilan cheklanadi: aks holda
+# admin bot ogohlantirishlar seli ostida qolardi.
+SHOP_LINK_ALERT_COOLDOWN_SECONDS = 900  # 15 daqiqa
+_MAX_TRACKED_ALERTS = 5000
+_last_shop_link_alert: "OrderedDict[tuple[int, str], float]" = OrderedDict()
+
+
+def _alert_allowed(user_id: int, reason: str) -> bool:
+    """Shu foydalanuvchi+sabab uchun ogohlantirish yuborish mumkinmi."""
+    key = (user_id, reason)
+    now = time.monotonic()
+    previous = _last_shop_link_alert.get(key)
+    if previous is not None and (now - previous) < SHOP_LINK_ALERT_COOLDOWN_SECONDS:
+        return False
+    _last_shop_link_alert[key] = now
+    _last_shop_link_alert.move_to_end(key)
+    while len(_last_shop_link_alert) > _MAX_TRACKED_ALERTS:
+        _last_shop_link_alert.popitem(last=False)
+    return True
+
+
+async def _alert_admins_throttled(user_id: int, reason: str, text: str) -> None:
+    if _alert_allowed(user_id, reason):
+        await _notify_admins(text)
+
+
+def _who(user_id: int, username: str | None, full_name: str | None) -> str:
+    """Ogohlantirishlar uchun foydalanuvchi identifikatori."""
+    handle = f"@{html.escape(username)}" if username else "username yo'q"
+    name = html.escape(full_name or "Noma'lum")
+    return f"{name} ({handle}, <code>{user_id}</code>)"
+
+
+async def _handle_shop_link(
+    message: Message, payload: str, user_id: int, username: str | None
+) -> None:
     """`/start shop_<id>_<imzo>` havolasini imzo bilan tekshirib do'konni ulaydi.
 
     Imzosiz havolalar rad etiladi: aks holda do'kon ID sini bilgan har kim
@@ -80,8 +127,18 @@ async def _handle_shop_link(message: Message, payload: str, user_id: int, userna
     """
     shop_id, signature = parse_shop_payload(payload)
 
+    who = _who(user_id, username, message.from_user.full_name)
+
     if not SHOP_LINK_SECRET:
         logger.error("SHOP_LINK_SECRET sozlanmagan — do'kon ulash o'chirib qo'yildi")
+        await _alert_admins_throttled(
+            user_id,
+            "no_secret",
+            "🚨 <b>DO'KON ULASH O'CHIQ — SHOP_LINK_SECRET sozlanmagan!</b>\n\n"
+            "Sotuvchilar do'konlarini ulay olmayapti.\n"
+            f"👤 <b>Urinib ko'rdi:</b> {who}\n\n"
+            "Kalitni bot muhitiga va asox.uz backendiga bir xil qilib qo'ying.",
+        )
         await message.answer(
             "⚠️ <b>Do'kon ulash xizmati vaqtincha ishlamayapti.</b>\n"
             "Iltimos, @asox_support ga murojaat qiling.",
@@ -94,6 +151,16 @@ async def _handle_shop_link(message: Message, payload: str, user_id: int, userna
         logger.warning(
             "Yaroqsiz do'kon ulash havolasi: payload=%r user_id=%s", payload, user_id
         )
+        await _alert_admins_throttled(
+            user_id,
+            "bad_signature",
+            "⚠️ <b>YAROQSIZ DO'KON ULASH URINISHI</b>\n\n"
+            f"👤 <b>Kim:</b> {who}\n"
+            f"🔗 <b>Payload:</b> <code>{html.escape(payload)}</code>\n\n"
+            "<i>Imzo mos kelmadi — havola qo'lda tuzilgan yoki eskirgan bo'lishi mumkin. "
+            f"Takroriy urinishlar {SHOP_LINK_ALERT_COOLDOWN_SECONDS // 60} daqiqa davomida "
+            "qayta xabar qilinmaydi.</i>",
+        )
         await message.answer(
             "❌ <b>Havola yaroqsiz.</b>\n\n"
             "Do'konni ulash havolasini asox.uz saytidagi sotuvchi kabinetingizdan oling.",
@@ -104,6 +171,27 @@ async def _handle_shop_link(message: Message, payload: str, user_id: int, userna
 
     shop, error = await db.link_shop_telegram(shop_id, user_id, username)
     if error:
+        if error == "already_linked":
+            # Imzo TO'G'RI edi, lekin do'kon boshqa chatga bog'langan. Bu
+            # havola sizib chiqqanini yoki egalik nizosini bildiradi —
+            # cooldownsiz, har safar xabar qilinadi.
+            await _notify_admins(
+                "🚨 <b>BAND DO'KONNI ULASHGA URINISH</b>\n\n"
+                f"🏪 <b>Do'kon ID:</b> <code>{html.escape(shop_id)}</code>\n"
+                f"👤 <b>Kim:</b> {who}\n\n"
+                "<i>Imzo to'g'ri edi, lekin do'kon allaqachon boshqa Telegram "
+                "chatiga bog'langan. Havola sizib chiqqan bo'lishi mumkin — "
+                "do'kon egasi bilan bog'laning.</i>"
+            )
+        else:
+            await _alert_admins_throttled(
+                user_id,
+                error,
+                "⚠️ <b>DO'KON ULASH MUVAFFAQIYATSIZ</b>\n\n"
+                f"🏪 <b>Do'kon ID:</b> <code>{html.escape(shop_id)}</code>\n"
+                f"👤 <b>Kim:</b> {who}\n"
+                f"❗ <b>Sabab:</b> <code>{error}</code>",
+            )
         await message.answer(
             SHOP_LINK_ERRORS.get(error, SHOP_LINK_ERRORS["error"]),
             reply_markup=get_main_keyboard(),
@@ -121,6 +209,17 @@ async def _handle_shop_link(message: Message, payload: str, user_id: int, userna
         f"🔔 Endi ushbu do'konga yangi buyurtma tushganda, barcha tafsilotlar real vaqtda shu yerga yuboriladi.",
         reply_markup=get_main_keyboard(),
         parse_mode="HTML",
+    )
+
+    # Muvaffaqiyatli ulanish — kam uchraydi, shuning uchun cooldownsiz.
+    # Ilgari bu hodisa faqat server logiga tushardi va adminlar do'kon
+    # bildirishnomalari kimga ketayotganini bilmasdi.
+    await _notify_admins(
+        "🏪 <b>DO'KON BOTGA ULANDI</b>\n\n"
+        f"🏪 <b>Do'kon:</b> {html.escape(str(shop_name))}\n"
+        f"🆔 <b>ID:</b> <code>{html.escape(shop_id)}</code>\n"
+        f"👤 <b>Kim:</b> {who}\n\n"
+        "<i>Endi shu do'konga tushgan buyurtmalar o'sha Telegram chatiga yuboriladi.</i>"
     )
 
 
