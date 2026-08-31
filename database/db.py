@@ -207,6 +207,19 @@ class Database:
                     self._users[user_id]["username"] = username
                 if full_name:
                     self._users[user_id]["full_name"] = full_name
+
+            # Broadcast auditoriyasi: admin bot shu ro'yxatga e'lon yuboradi
+            if _db_client:
+                try:
+                    _db_client.collection("bot_users").document(str(user_id)).set({
+                        "telegramId": user_id,
+                        "username": username or "",
+                        "fullName": full_name or "",
+                        "lastSeenAt": firestore.SERVER_TIMESTAMP,
+                    }, merge=True)
+                except Exception:
+                    pass
+
             return self._users[user_id]
 
     async def update_user_phone(self, user_id: int, phone: str):
