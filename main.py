@@ -1,14 +1,15 @@
 import asyncio
 import logging
 import sys
-from aiohttp import web
 
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiohttp import web
 
-from config import BOT_TOKEN, ADMIN_BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_PATH, PORT, ENVIRONMENT
-from handlers import start, catalog, cart, checkout, orders, admin
+from config import ADMIN_BOT_TOKEN, BOT_TOKEN, ENVIRONMENT, PORT
+from handlers import admin, cart, catalog, errors, start
+from middlewares import setup_throttling
 
 # Setup logging
 logging.basicConfig(
@@ -17,8 +18,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-import json
-from database.db import Database, CATEGORIES, SAMPLE_PRODUCTS
+# Diqqat: bu import ataylab logging sozlamasidan KEYIN turadi — database.db
+# import paytida Firestore holati haqida log yozadi va u formatlangan
+# ko'rinishda chiqishi kerak.
+from database.db import CATEGORIES, SAMPLE_PRODUCTS  # noqa: E402
+
 
 async def safe_start_polling(bot: Bot, dp: Dispatcher, bot_name: str):
     try:
@@ -77,6 +81,8 @@ async def main():
         dp_user.include_router(start.router)
         dp_user.include_router(catalog.router)
         dp_user.include_router(cart.router)
+        errors.setup_errors(dp_user)
+        setup_throttling(dp_user)
         polling_tasks.append(safe_start_polling(bot_user, dp_user, "ASOX Market User Bot (@AsoxUz_Bot)"))
 
     # 3. Dedicated Admin Bot (@asox_admin_bot)
@@ -84,20 +90,33 @@ async def main():
         bot_admin = Bot(token=ADMIN_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         dp_admin = Dispatcher()
         dp_admin.include_router(admin.router)
+        errors.setup_errors(dp_admin)
+        setup_throttling(dp_admin, rate_limit=0.3)
         polling_tasks.append(safe_start_polling(bot_admin, dp_admin, "ASOX Market Admin Bot (@asox_admin_bot)"))
 
-    if polling_tasks:
-        try:
-            await asyncio.gather(*polling_tasks)
-        except Exception as e:
-            logging.error(f"Polling tasks error: {e}")
+    if not polling_tasks:
+        logging.error(
+            "❌ Hech qanday bot tokeni sozlanmagan. BOT_TOKEN (va kerak bo'lsa "
+            "ADMIN_BOT_TOKEN) ni .env yoki muhit o'zgaruvchilariga qo'shing."
+        )
+        return 1
 
-    # Keep server running locally
-    while True:
-        await asyncio.sleep(3600)
+    logging.info("Muhit: %s | Ishga tushgan botlar: %s", ENVIRONMENT, len(polling_tasks))
+    results = await asyncio.gather(*polling_tasks, return_exceptions=True)
+    for result in results:
+        if isinstance(result, Exception):
+            logging.error("Polling vazifasi xato bilan tugadi: %s", result)
+
+    # Barcha polling vazifalari tugadi — bu odatda token yaroqsizligini bildiradi.
+    logging.error("⚠️ Barcha botlar to'xtadi. Tokenlarni va tarmoqni tekshiring.")
+    return 1
 
 if __name__ == "__main__":
+    # Diqqat: sys.exit() ni try ichida chaqirmaymiz — u ko'targan SystemExit
+    # o'sha except tomonidan yutilib, jarayon 0 kod bilan tugab qolardi.
     try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
+        exit_code = asyncio.run(main())
+    except KeyboardInterrupt:
         logging.info("Bots stopped.")
+        exit_code = 0
+    sys.exit(exit_code or 0)

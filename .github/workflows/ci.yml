@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Kutubxonalarni o'rnatish
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Testlar
+        # Test to'plami tarmoqqa chiqmaydi: Firestore soxta klient bilan
+        # almashtiriladi, credential berilmagani uchun ADC qidiruvi ham
+        # o'tkazib yuboriladi.
+        run: python tests/run_all.py
+
+      - name: Import qilinishini tekshirish (ikkala bot yig'iladimi)
+        run: |
+          python - <<'PY'
+          import logging
+          logging.disable(logging.CRITICAL)
+          from aiogram import Dispatcher
+          from handlers import admin, cart, catalog, errors, start
+          from middlewares import setup_throttling
+
+          dp_user = Dispatcher()
+          for r in (start.router, catalog.router, cart.router):
+              dp_user.include_router(r)
+          errors.setup_errors(dp_user)
+          setup_throttling(dp_user)
+
+          dp_admin = Dispatcher()
+          dp_admin.include_router(admin.router)
+          errors.setup_errors(dp_admin)
+          setup_throttling(dp_admin, rate_limit=0.3)
+          print("OK: ikkala dispatcher yig'ildi")
+          PY
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Docker image build
+        run: docker build -t asox-bot:ci .
+
+      - name: Tokensiz ishga tushirish 1 kod bilan tugashi kerak
+        run: |
+          set +e
+          docker run --rm -e BOT_TOKEN="" -e ADMIN_BOT_TOKEN="" asox-bot:ci
+          code=$?
+          set -e
+          echo "exit kodi: $code"
+          test "$code" -eq 1
+
+      - name: Konteyner root ostida ishlamasligi kerak
+        run: |
+          uid=$(docker run --rm asox-bot:ci id -u)
+          echo "uid: $uid"
+          test "$uid" -ne 0

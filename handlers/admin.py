@@ -1,17 +1,26 @@
-from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
+import logging
+
+from aiogram import Bot, F, Router
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from config import is_admin_user
 from database.db import db
-from config import ADMIN_IDS, is_admin_user
-from states.states import AdminStates
 from keyboards.inline import get_admin_order_keyboard, get_categories_keyboard
-from utils.formatters import format_price, get_order_status_badge
-
-from aiogram.filters import CommandStart, Command
 from keyboards.reply import get_admin_keyboard
+from states.states import AdminStates
+from utils.formatters import esc, format_price, get_order_status_badge
+from utils.validators import require_text
+
+logger = logging.getLogger(__name__)
 
 router = Router()
+
+# Telegram limiti ~30 xabar/sekund. 20/s bilan ishlaymiz — bot bloklanmasin.
+BROADCAST_DELAY_SECONDS = 0.05
+BROADCAST_PROGRESS_EVERY = 25
 
 def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -50,7 +59,7 @@ async def show_admin_panel(message: Message):
         await message.answer("⛔️ Kechirasiz, sizda admin huquqlari yo'q.")
         return
 
-    await message.answer("⚙️ **ASOX Market Admin Paneli**", reply_markup=get_admin_panel_keyboard(), parse_mode="Markdown")
+    await message.answer("⚙️ <b>ASOX Market Admin Paneli</b>", reply_markup=get_admin_panel_keyboard(), parse_mode="HTML")
 
 @router.message(F.text == "📊 Tizim statistikasi")
 async def admin_stats_text(message: Message):
@@ -60,12 +69,12 @@ async def admin_stats_text(message: Message):
     all_orders = await db.get_all_orders()
     total_revenue = sum(o.get("total_amount", 0) for o in all_orders if o.get("status") == "delivered")
     stats_text = (
-        f"📊 **ASOX Market Statistikasi**\n\n"
-        f"👥 **Foydalanuvchilar soni:** {users_count} ta\n"
-        f"📦 **Jami buyurtmalar:** {len(all_orders)} ta\n"
-        f"💰 **Jami tushum (Bajarilgan):** {format_price(total_revenue)}"
+        f"📊 <b>ASOX Market Statistikasi</b>\n\n"
+        f"👥 <b>Foydalanuvchilar soni:</b> {users_count} ta\n"
+        f"📦 <b>Jami buyurtmalar:</b> {len(all_orders)} ta\n"
+        f"💰 <b>Jami tushum (Bajarilgan):</b> {format_price(total_revenue)}"
     )
-    await message.answer(stats_text, reply_markup=get_admin_panel_keyboard(), parse_mode="Markdown")
+    await message.answer(stats_text, reply_markup=get_admin_panel_keyboard(), parse_mode="HTML")
 
 @router.message(F.text == "📦 Barcha buyurtmalar")
 async def admin_view_orders_text(message: Message):
@@ -76,20 +85,22 @@ async def admin_view_orders_text(message: Message):
         await message.answer("Hozircha buyurtmalar yo'q.")
         return
     for order in orders[:5]:
-        items_summary = "".join(f"• {i.get('product', {}).get('name', 'Tovar')} ({i.get('quantity', 1)}x)\n" for i in order.get("items", []))
+        items_summary = "".join(
+            f"• {esc(i.get('name', 'Tovar'))} ({i.get('quantity', 1)}x)\n" for i in order.get("items", [])
+        )
         text = (
-            f"🆔 **Order #{order.get('id', '')}** ({order.get('created_at', '')})\n"
-            f"👤 **Mijoz:** {order.get('user_name', '')} (`{order.get('user_id', '')}`)\n"
-            f"📱 **Tel:** {order.get('phone_number', '')}\n"
-            f"📍 **Manzil:** {order.get('address', '')}\n"
-            f"💰 **Summa:** {format_price(order.get('total_amount', 0))}\n"
-            f"📊 **Holati:** {get_order_status_badge(order.get('status', 'pending'))}\n\n"
-            f"📦 **Mahsulotlar:**\n{items_summary}"
+            f"🆔 <b>Order #{esc(order.get('id', ''))}</b> ({esc(order.get('created_at', ''))})\n"
+            f"👤 <b>Mijoz:</b> {esc(order.get('user_name', ''))} (<code>{order.get('user_id', '')}</code>)\n"
+            f"📱 <b>Tel:</b> <code>{esc(order.get('phone_number', ''))}</code>\n"
+            f"📍 <b>Manzil:</b> {esc(order.get('address', ''))}\n"
+            f"💰 <b>Summa:</b> {format_price(order.get('total_amount', 0))}\n"
+            f"📊 <b>Holati:</b> {get_order_status_badge(order.get('status', 'pending'))}\n\n"
+            f"📦 <b>Mahsulotlar:</b>\n{items_summary}"
         )
         await message.answer(
             text,
             reply_markup=get_admin_order_keyboard(order.get('id', ''), order.get('status', 'pending')),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
 @router.message(F.text == "➕ Yangi mahsulot qo'shish")
@@ -97,7 +108,7 @@ async def admin_add_product_text(message: Message, state: FSMContext):
     if not is_admin_user(message.from_user.id, message.from_user.username):
         return
     await state.set_state(AdminStates.waiting_for_product_name)
-    await message.answer("📝 **Yangi mahsulot nomini kiriting:**", parse_mode="Markdown")
+    await message.answer("📝 <b>Yangi mahsulot nomini kiriting:</b>", parse_mode="HTML")
 
 @router.message(F.text == "📢 Xabar tarqatish")
 async def admin_broadcast_text(message: Message, state: FSMContext):
@@ -105,9 +116,9 @@ async def admin_broadcast_text(message: Message, state: FSMContext):
         return
     await state.set_state(AdminStates.waiting_for_broadcast_text)
     await message.answer(
-        "📢 **Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:**\n\n"
+        "📢 <b>Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:</b>\n\n"
         "(Matn, rasm yoki media yuborishingiz mumkin. Bekor qilish uchun ❌ Bekor qilish tugmasini bosing)",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @router.callback_query(F.data == "admin_stats")
@@ -117,15 +128,15 @@ async def admin_stats_cb(callback: CallbackQuery):
 
     users_count = await db.get_users_count()
     all_orders = await db.get_all_orders()
-    total_revenue = sum(o["total_amount"] for o in all_orders if o["status"] == "delivered")
+    total_revenue = sum(o.get("total_amount", 0) for o in all_orders if o.get("status") == "delivered")
 
     stats_text = (
-        f"📊 **ASOX Market Statistikasi**\n\n"
-        f"👥 **Foydalanuvchilar soni:** {users_count} ta\n"
-        f"📦 **Jami buyurtmalar:** {len(all_orders)} ta\n"
-        f"💰 **Jami tushum (Bajarilgan):** {format_price(total_revenue)}"
+        f"📊 <b>ASOX Market Statistikasi</b>\n\n"
+        f"👥 <b>Foydalanuvchilar soni:</b> {users_count} ta\n"
+        f"📦 <b>Jami buyurtmalar:</b> {len(all_orders)} ta\n"
+        f"💰 <b>Jami tushum (Bajarilgan):</b> {format_price(total_revenue)}"
     )
-    await callback.message.edit_text(stats_text, reply_markup=get_admin_panel_keyboard(), parse_mode="Markdown")
+    await callback.message.edit_text(stats_text, reply_markup=get_admin_panel_keyboard(), parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "admin_view_orders")
@@ -140,20 +151,22 @@ async def admin_view_orders_cb(callback: CallbackQuery):
 
     await callback.answer()
     for order in orders[:5]: # Show latest 5
-        items_summary = "".join(f"• {i['product']['name']} ({i['quantity']}x)\n" for i in order["items"])
+        items_summary = "".join(
+            f"• {esc(i.get('name', 'Tovar'))} ({i.get('quantity', 1)}x)\n" for i in order.get("items", [])
+        )
         text = (
-            f"🆔 **Order #{order['id']}** ({order['created_at']})\n"
-            f"👤 **Mijoz:** {order['user_name']} (`{order['user_id']}`)\n"
-            f"📱 **Tel:** {order['phone_number']}\n"
-            f"📍 **Manzil:** {order['address']}\n"
-            f"💰 **Summa:** {format_price(order['total_amount'])}\n"
-            f"📊 **Holati:** {get_order_status_badge(order['status'])}\n\n"
-            f"📦 **Mahsulotlar:**\n{items_summary}"
+            f"🆔 <b>Order #{esc(order.get('id', ''))}</b> ({esc(order.get('created_at', ''))})\n"
+            f"👤 <b>Mijoz:</b> {esc(order.get('user_name', ''))} (<code>{order.get('user_id', '')}</code>)\n"
+            f"📱 <b>Tel:</b> <code>{esc(order.get('phone_number', ''))}</code>\n"
+            f"📍 <b>Manzil:</b> {esc(order.get('address', ''))}\n"
+            f"💰 <b>Summa:</b> {format_price(order.get('total_amount', 0))}\n"
+            f"📊 <b>Holati:</b> {get_order_status_badge(order.get('status', 'pending'))}\n\n"
+            f"📦 <b>Mahsulotlar:</b>\n{items_summary}"
         )
         await callback.message.answer(
             text,
-            reply_markup=get_admin_order_keyboard(order['id'], order['status']),
-            parse_mode="Markdown"
+            reply_markup=get_admin_order_keyboard(order.get('id', ''), order.get('status', 'pending')),
+            parse_mode="HTML"
         )
 
 @router.callback_query(F.data.startswith("adm_ord:"))
@@ -168,14 +181,18 @@ async def admin_change_order_status(callback: CallbackQuery, bot: Bot):
         order = await db.get_order_by_id(order_id)
         status_badge = get_order_status_badge(new_status)
         await callback.answer(f"Buyurtma #{order_id} holati o'zgartirildi: {status_badge}")
-        
+
         # Update user about status change
         if order:
             try:
                 await bot.send_message(
                     chat_id=order["user_id"],
-                    text=f"🔔 **Buyurtmangiz holati o'zgardi!**\n\nBuyurtma ID: `{order_id}`\nYangi holat: **{status_badge}**",
-                    parse_mode="Markdown"
+                    text=(
+                        f"🔔 <b>Buyurtmangiz holati o'zgardi!</b>\n\n"
+                        f"Buyurtma ID: <code>{esc(order_id)}</code>\n"
+                        f"Yangi holat: <b>{status_badge}</b>"
+                    ),
+                    parse_mode="HTML"
                 )
             except Exception:
                 pass
@@ -189,41 +206,53 @@ async def admin_add_product_start(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(AdminStates.waiting_for_product_name)
-    await callback.message.answer("📝 **Yangi mahsulot nomini kiriting:**", parse_mode="Markdown")
+    await callback.message.answer("📝 <b>Yangi mahsulot nomini kiriting:</b>", parse_mode="HTML")
     await callback.answer()
 
 @router.message(AdminStates.waiting_for_product_name)
 async def process_prod_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text)
+    name = await require_text(message, "❌ Mahsulot nomini <b>matn</b> ko'rinishida yuboring:")
+    if name is None:
+        return
+    await state.update_data(name=name)
     await state.set_state(AdminStates.waiting_for_product_price)
-    await message.answer("💰 **Mahsulot narxini kiriting (faqat raqam, masalan: 1500000):**", parse_mode="Markdown")
+    await message.answer("💰 <b>Mahsulot narxini kiriting</b> (faqat raqam, masalan: 1500000):", parse_mode="HTML")
 
 @router.message(AdminStates.waiting_for_product_price)
 async def process_prod_price(message: Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("❌ Iltimos, faqat raqam kiriting:")
+    price_text = await require_text(message, "❌ Narxni <b>raqam</b> ko'rinishida yuboring:")
+    if price_text is None:
+        return
+    # bo'sh joy va ajratgichlarga toqat qilamiz: "1 500 000" / "1,500,000"
+    digits = price_text.replace(" ", "").replace(",", "").replace("_", "")
+    if not digits.isdigit():
+        await message.answer("❌ Iltimos, faqat raqam kiriting (masalan: 1500000):")
         return
 
-    await state.update_data(price=int(message.text))
+    await state.update_data(price=int(digits))
     await state.set_state(AdminStates.waiting_for_product_description)
-    await message.answer("📝 **Mahsulot haqida qisqacha tavsif (description) kiriting:**", parse_mode="Markdown")
+    await message.answer("📝 <b>Mahsulot haqida qisqacha tavsif kiriting:</b>", parse_mode="HTML")
 
 @router.message(AdminStates.waiting_for_product_description)
 async def process_prod_desc(message: Message, state: FSMContext):
-    await state.update_data(description=message.text)
+    description = await require_text(message, "❌ Tavsifni <b>matn</b> ko'rinishida yuboring:")
+    if description is None:
+        return
+    await state.update_data(description=description)
     categories = await db.get_categories()
     await state.set_state(AdminStates.waiting_for_product_category)
-    await message.answer("📂 **Mahsulot qaysi kategoriyaga tegishli?**", reply_markup=get_categories_keyboard(categories), parse_mode="Markdown")
+    await message.answer("📂 <b>Mahsulot qaysi kategoriyaga tegishli?</b>", reply_markup=get_categories_keyboard(categories), parse_mode="HTML")
 
 @router.callback_query(AdminStates.waiting_for_product_category, F.data.startswith("cat:"))
 async def process_prod_cat(callback: CallbackQuery, state: FSMContext):
     cat_id = callback.data.split(":")[1]
     await state.update_data(category_id=cat_id)
-    
+
     await state.set_state(AdminStates.waiting_for_product_image)
     await callback.message.answer(
-        "🖼 **Mahsulot rasmini yuboring (fayl yoki rasm ko'rinishida) yoki standat rasm ishlatish uchun 'otish' deb yozing:**",
-        parse_mode="Markdown"
+        "🖼 <b>Mahsulot rasmini yuboring</b> (fayl yoki rasm ko'rinishida)\n"
+        "yoki standart rasm ishlatish uchun <code>otish</code> deb yozing:",
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -235,20 +264,20 @@ async def process_prod_image(message: Message, state: FSMContext):
 
     data = await state.get_data()
     new_prod = await db.add_product({
-        "category_id": data.get("category_id", "cat_phones"),
-        "name": data["name"],
-        "price": data["price"],
-        "description": data["description"],
+        "category_id": data.get("category_id", ""),
+        "name": data.get("name", "Mahsulot"),
+        "price": data.get("price", 0),
+        "description": data.get("description", ""),
         "image_url": image_url
     })
 
     await state.clear()
     await message.answer(
-        f"✅ **Yangi mahsulot qo'shildi!**\n\n"
-        f"ID: `{new_prod['id']}`\n"
-        f"Nomi: **{new_prod['name']}**\n"
+        f"✅ <b>Yangi mahsulot qo'shildi!</b>\n\n"
+        f"ID: <code>{esc(new_prod['id'])}</code>\n"
+        f"Nomi: <b>{esc(new_prod['name'])}</b>\n"
         f"Narxi: {format_price(new_prod['price'])}",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 # Broadcast functionality
@@ -259,9 +288,9 @@ async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(AdminStates.waiting_for_broadcast_text)
     await callback.message.answer(
-        "📢 **Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:**\n\n"
+        "📢 <b>Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:</b>\n\n"
         "(Matn, rasm yoki media yuborishingiz mumkin. Bekor qilish uchun ❌ Bekor qilish tugmasini bosing)",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -272,26 +301,45 @@ async def process_broadcast_message(message: Message, state: FSMContext, bot: Bo
         await message.answer("❌ Xabar tarqatish bekor qilindi.")
         return
 
-    users = db._users.keys()
+    # Auditoriya Firestore `bot_users` dan olinadi — xotiradagi ro'yxat
+    # bot qayta ishga tushganda bo'shab qolardi.
+    users = await db.get_broadcast_user_ids()
+    await state.clear()
+
+    if not users:
+        await message.answer("⚠️ Xabar tarqatish uchun foydalanuvchilar ro'yxati bo'sh.")
+        return
+
     count_success = 0
     count_fail = 0
+    total = len(users)
+    status_msg = await message.answer(f"⏳ Xabar yuborilmoqda... (0/{total})")
 
-    status_msg = await message.answer("⏳ Xabar yuborilmoqda...")
-
-    for user_id in list(users):
+    for index, user_id in enumerate(users, 1):
         try:
             await message.copy_to(chat_id=user_id)
             count_success += 1
         except Exception:
             count_fail += 1
+        # Telegram flood limitiga urilmaslik uchun
+        await asyncio.sleep(BROADCAST_DELAY_SECONDS)
+        if index % BROADCAST_PROGRESS_EVERY == 0:
+            try:
+                await status_msg.edit_text(f"⏳ Xabar yuborilmoqda... ({index}/{total})")
+            except Exception:
+                pass
 
-    await state.clear()
-    await status_msg.edit_text(
-        f"✅ **Xabarnoma yakunlandi!**\n\n"
-        f"🟢 Yuborildi: {count_success} ta\n"
-        f"🔴 Xatolik (Bloklangan): {count_fail} ta",
-        parse_mode="Markdown"
-    )
+    logger.info("Broadcast yakunlandi: %s ta yuborildi, %s ta xato", count_success, count_fail)
+    try:
+        await status_msg.edit_text(
+            f"✅ <b>Xabarnoma yakunlandi!</b>\n\n"
+            f"👥 Auditoriya: {total} ta\n"
+            f"🟢 Yuborildi: {count_success} ta\n"
+            f"🔴 Xatolik (Bloklangan): {count_fail} ta",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
 
 # 🎨 Dizaynerlar arizalari
 @router.message(F.text == "🎨 Dizaynerlar arizalari")
@@ -314,11 +362,12 @@ async def admin_view_designers_handler(event: Message | CallbackQuery):
     await msg.answer(f"🎨 <b>Jami dizaynerlik arizalari ({len(requests)} ta):</b>", parse_mode="HTML")
     for req in requests[:10]:
         status_badge = "⏳ Ko'rib chiqilmoqda" if req.get("status") == "pending" else ("✅ Tasdiqlangan" if req.get("status") == "approved" else "❌ Rad etilgan")
-        portfolio = f"<a href='{req.get('portfolioUrl')}'>{req.get('portfolioUrl')}</a>" if req.get("portfolioUrl") else "Ko'rsatilmagan"
-        tg = f"@{req.get('telegramUsername')}" if req.get("telegramUsername") else "Ko'rsatilmagan"
-        full_name = req.get("fullName") or "Noma'lum"
-        phone = req.get("phoneNumber") or ""
-        specialty = req.get("specialty") or "Umumiy"
+        portfolio_url = esc(req.get("portfolioUrl"))
+        portfolio = f"<a href='{portfolio_url}'>{portfolio_url}</a>" if portfolio_url else "Ko'rsatilmagan"
+        tg = f"@{esc(req.get('telegramUsername'))}" if req.get("telegramUsername") else "Ko'rsatilmagan"
+        full_name = esc(req.get("fullName") or "Noma'lum")
+        phone = esc(req.get("phoneNumber") or "")
+        specialty = esc(req.get("specialty") or "Umumiy")
         text = (
             f"🎨 <b>Dizayner: {full_name}</b>\n"
             f"📞 <b>Tel:</b> <code>{phone}</code>\n"
@@ -356,11 +405,11 @@ async def admin_view_couriers_handler(event: Message | CallbackQuery):
     await msg.answer(f"🛵 <b>Jami Samarqand kuryerlik arizalari ({len(requests)} ta):</b>", parse_mode="HTML")
     for req in requests[:10]:
         status_badge = "⏳ Ko'rib chiqilmoqda" if req.get("status") == "pending" else ("✅ Tasdiqlangan" if req.get("status") == "approved" else "❌ Rad etilgan")
-        tg = f"@{req.get('telegramUsername')}" if req.get("telegramUsername") else "Ko'rsatilmagan"
-        full_name = req.get("fullName") or "Noma'lum"
-        phone = req.get("phoneNumber") or ""
-        city = req.get("city") or "Samarqand"
-        vehicle = req.get("vehicle") or "Skuter / Moped"
+        tg = f"@{esc(req.get('telegramUsername'))}" if req.get("telegramUsername") else "Ko'rsatilmagan"
+        full_name = esc(req.get("fullName") or "Noma'lum")
+        phone = esc(req.get("phoneNumber") or "")
+        city = esc(req.get("city") or "Samarqand")
+        vehicle = esc(req.get("vehicle") or "Skuter / Moped")
         text = (
             f"🛵 <b>Kuryer: {full_name}</b>\n"
             f"📞 <b>Tel:</b> <code>{phone}</code>\n"
@@ -380,6 +429,10 @@ async def admin_view_couriers_handler(event: Message | CallbackQuery):
 # Action callbacks
 @router.callback_query(F.data.startswith("appr_des_"))
 async def approve_designer_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("appr_des_", "")
     await db.update_designer_request_status(req_id, "approved")
     await callback.message.edit_text(callback.message.html_text + "\n\n✅ <b>Dizayner arizasi tasdiqlandi!</b>", parse_mode="HTML")
@@ -387,6 +440,10 @@ async def approve_designer_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("rejc_des_"))
 async def reject_designer_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("rejc_des_", "")
     await db.update_designer_request_status(req_id, "rejected")
     await callback.message.edit_text(callback.message.html_text + "\n\n❌ <b>Ariza rad etildi.</b>", parse_mode="HTML")
@@ -394,6 +451,10 @@ async def reject_designer_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("appr_cou_"))
 async def approve_courier_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("appr_cou_", "")
     await db.update_courier_request_status(req_id, "approved")
     await callback.message.edit_text(callback.message.html_text + "\n\n✅ <b>Kuryer arizasi tasdiqlandi!</b>", parse_mode="HTML")
@@ -401,6 +462,10 @@ async def approve_courier_cb(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("rejc_cou_"))
 async def reject_courier_cb(callback: CallbackQuery):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
     req_id = callback.data.replace("rejc_cou_", "")
     await db.update_courier_request_status(req_id, "rejected")
     await callback.message.edit_text(callback.message.html_text + "\n\n❌ <b>Ariza rad etildi.</b>", parse_mode="HTML")

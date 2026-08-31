@@ -1,0 +1,25 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = ["venv", ".venv", "__pycache__"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle xatolari
+    "F",    # pyflakes (ishlatilmagan import/o'zgaruvchi, aniqlanmagan nom)
+    "W",    # pycodestyle ogohlantirishlari
+    "I",    # import tartibi
+    "B",    # flake8-bugbear (keng tarqalgan xatoliklar)
+    "UP",   # eskirgan sintaksis
+    "C4",   # keraksiz comprehension
+    "RUF",  # ruff'ning o'z qoidalari
+]
+ignore = [
+    "E501",    # uzun qatorlar — matnli xabarlarda tabiiy
+    "RUF001",  # kirill/lotin o'xshash belgilar — o'zbek matnida noto'g'ri ishlaydi
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # _harness sys.path ni sozlagandan keyin import qilinadi
