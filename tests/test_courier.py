@@ -174,6 +174,19 @@ async def main():
     done = build_progress_text({"orderNumber": "1042", "courierFee": 24600}, "delivered")
     check("yetkazildi matni", "24 600" in done)
 
+    print("\n[7] Admin: kuryerlar ro'yxati va o'chirish")
+    couriers = await db.list_couriers()
+    ids = [c["id"] for c in couriers]
+    check("ikkala kuryer ham ro'yxatda", "555" in ids and "777" in ids)
+    check("id maydoni bor", all("id" in c for c in couriers))
+
+    check("o'chirish ishladi", await db.set_courier_active("777", False))
+    check("isActive False bo'ldi", fake.data["couriers"]["777"]["isActive"] is False)
+    check("qayta yoqish ishladi", await db.set_courier_active("777", True))
+    check("isActive True bo'ldi", fake.data["couriers"]["777"]["isActive"] is True)
+    check("mavjud bo'lmagan kuryer -> False",
+          not await db.set_courier_active("yo-q", False))
+
     return _r.summary("Natija")
 
 

@@ -1002,5 +1002,42 @@ class Database:
             return None
 
 
+
+    def _sync_list_couriers(self, limit: int) -> list[dict[str, Any]]:
+        docs = _db_client.collection("couriers").limit(limit).stream()
+        return [{**(d.to_dict() or {}), "id": d.id} for d in docs]
+
+    async def list_couriers(self, limit: int = 30) -> list[dict[str, Any]]:
+        """Barcha kuryerlar — faol va o'chirilganlari bilan birga.
+
+        `isActive` bo'yicha filtrlamaydi: admin aynan o'chirilganlarini ham
+        ko'rib, kerak bo'lsa qaytadan yoqishi kerak.
+        """
+        if not _db_client:
+            return []
+        try:
+            return await _in_thread(self._sync_list_couriers, limit)
+        except Exception as e:
+            logger.error("Kuryerlar ro'yxatini olishda xato: %s", e)
+            return []
+
+    def _sync_set_courier_active(self, courier_id: str, is_active: bool) -> None:
+        _db_client.collection("couriers").document(courier_id).update({
+            "isActive": bool(is_active),
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+    async def set_courier_active(self, courier_id: str, is_active: bool) -> bool:
+        """Kuryerni yoqadi/o'chiradi. O'chirilganiga taklif yuborilmaydi."""
+        if not _db_client:
+            return False
+        try:
+            await _in_thread(self._sync_set_courier_active, str(courier_id), is_active)
+            return True
+        except Exception as e:
+            logger.error("Kuryer %s holatini o'zgartirishda xato: %s", courier_id, e)
+            return False
+
+
 # Global database instance
 db = Database()

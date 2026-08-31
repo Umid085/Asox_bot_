@@ -29,6 +29,7 @@ def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📦 Barcha buyurtmalar", callback_data="admin_view_orders")],
             [InlineKeyboardButton(text="🎨 Dizaynerlar arizalari", callback_data="admin_view_designers")],
             [InlineKeyboardButton(text="🛵 Kuryerlar arizalari", callback_data="admin_view_couriers")],
+            [InlineKeyboardButton(text="👥 Kuryerlar ro'yxati", callback_data="admin_view_courier_list")],
             [InlineKeyboardButton(text="➕ Yangi mahsulot qo'shish", callback_data="admin_add_product")],
             [InlineKeyboardButton(text="📊 Tizim statistikasi", callback_data="admin_stats")],
             [InlineKeyboardButton(text="📢 Xabar tarqatish (Broadcast)", callback_data="admin_broadcast")]
@@ -501,3 +502,85 @@ async def reject_courier_cb(callback: CallbackQuery):
     await callback.answer("Ariza rad etildi.")
 
 
+
+
+# 👥 Kuryerlar ro'yxati — tasdiqlangan kuryerlarni ko'rish va o'chirish.
+# Ariza ro'yxatidan farqi: bu yerda ARIZALAR emas, ishlayotgan KURYERLAR.
+@router.message(F.text == "👥 Kuryerlar ro'yxati")
+@router.callback_query(F.data == "admin_view_courier_list")
+async def admin_courier_list_handler(event: Message | CallbackQuery):
+    if not is_admin_user(event.from_user.id, event.from_user.username):
+        return
+
+    msg = event if isinstance(event, Message) else event.message
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+
+    couriers = await db.list_couriers()
+    if not couriers:
+        await msg.answer(
+            "👥 <b>Hali birorta kuryer tasdiqlanmagan.</b>\n"
+            "Arizalarni «🛵 Kuryerlar arizalari» bo'limidan tasdiqlang.",
+            parse_mode="HTML",
+        )
+        return
+
+    active = sum(1 for c in couriers if c.get("isActive") is True)
+    await msg.answer(
+        f"👥 <b>Kuryerlar: {len(couriers)} ta</b> (faol: {active})", parse_mode="HTML"
+    )
+
+    for c in couriers:
+        is_active = c.get("isActive") is True
+        busy = c.get("activeOrderId")
+        state = "🟢 Faol" if is_active else "🔴 O'chirilgan"
+        if is_active and busy:
+            state = f"🟡 Band (zakas <code>{esc(busy)}</code>)"
+        # Ism alohida o'zgaruvchida: f-string ifodasi ichida teskari slesh
+        # Python 3.11 da sintaksis xatosi beradi (3.12 dan ruxsat).
+        name = esc(c.get("fullName") or "Noma'lum")
+        text = (
+            f"👤 <b>{name}</b>\n"
+            f"📞 <code>{esc(c.get('phoneNumber'))}</code>\n"
+            f"🚗 {esc(c.get('vehicle'))}   📍 {esc(c.get('city'))}\n"
+            f"📦 Yetkazgan: {c.get('completedCount', 0)} ta\n"
+            f"📊 {state}"
+        )
+        toggle = (
+            InlineKeyboardButton(
+                text="🔴 O'chirish", callback_data=f"cour_off_{c['id']}")
+            if is_active else
+            InlineKeyboardButton(
+                text="🟢 Yoqish", callback_data=f"cour_on_{c['id']}")
+        )
+        await msg.answer(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[toggle]]),
+            parse_mode="HTML",
+        )
+
+
+async def _toggle_courier(callback: CallbackQuery, courier_id: str, is_active: bool):
+    if not is_admin_user(callback.from_user.id, callback.from_user.username):
+        await callback.answer("⛔️ Sizda admin huquqlari yo'q.", show_alert=True)
+        return
+
+    if not await db.set_courier_active(courier_id, is_active):
+        await callback.answer("⚠️ O'zgartirib bo'lmadi.", show_alert=True)
+        return
+
+    label = "🟢 Faol" if is_active else "🔴 O'chirilgan"
+    await callback.message.edit_text(
+        callback.message.html_text + f"\n\n➡️ <b>{label}</b>", parse_mode="HTML"
+    )
+    await callback.answer("Bajarildi")
+
+
+@router.callback_query(F.data.startswith("cour_off_"))
+async def courier_disable_cb(callback: CallbackQuery):
+    await _toggle_courier(callback, callback.data.replace("cour_off_", ""), False)
+
+
+@router.callback_query(F.data.startswith("cour_on_"))
+async def courier_enable_cb(callback: CallbackQuery):
+    await _toggle_courier(callback, callback.data.replace("cour_on_", ""), True)
