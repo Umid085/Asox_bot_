@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   asox_telegram_bot:
     build: .

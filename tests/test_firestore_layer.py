@@ -59,8 +59,9 @@ async def main():
     check("mavjud bo'lmagan buyurtma -> False", not await db.update_order_status("YO-Q", "shipped"))
     check("get_order_by_id Firestore'dan o'qiydi",
           (await db.get_order_by_id("WEB-900"))["user_name"] == "Web Mijoz")
-    check("get_user_orders(555) botdagi buyurtmani topadi",
-          [o["id"] for o in await db.get_user_orders(555)] == ["ASOX-1001"])
+    check("bot endi buyurtma yaratmaydi (create_order olib tashlangan)",
+          not hasattr(db, "create_order"))
+    check("savat qatlami ham olib tashlangan", not hasattr(db, "get_cart"))
 
     print("\n[5] Broadcast auditoriyasi Firestore'danmi?")
     audience = sorted(await db.get_broadcast_user_ids())

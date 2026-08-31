@@ -7,8 +7,9 @@ from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
-from config import BOT_TOKEN, ADMIN_BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_PATH, PORT, ENVIRONMENT
+from config import BOT_TOKEN, ADMIN_BOT_TOKEN, PORT, ENVIRONMENT
 from handlers import start, catalog, cart, admin, errors
+from middlewares import setup_throttling
 
 # Setup logging
 logging.basicConfig(
@@ -78,6 +79,7 @@ async def main():
         dp_user.include_router(catalog.router)
         dp_user.include_router(cart.router)
         errors.setup_errors(dp_user)
+        setup_throttling(dp_user)
         polling_tasks.append(safe_start_polling(bot_user, dp_user, "ASOX Market User Bot (@AsoxUz_Bot)"))
 
     # 3. Dedicated Admin Bot (@asox_admin_bot)
@@ -86,20 +88,32 @@ async def main():
         dp_admin = Dispatcher()
         dp_admin.include_router(admin.router)
         errors.setup_errors(dp_admin)
+        setup_throttling(dp_admin, rate_limit=0.3)
         polling_tasks.append(safe_start_polling(bot_admin, dp_admin, "ASOX Market Admin Bot (@asox_admin_bot)"))
 
-    if polling_tasks:
-        try:
-            await asyncio.gather(*polling_tasks)
-        except Exception as e:
-            logging.error(f"Polling tasks error: {e}")
+    if not polling_tasks:
+        logging.error(
+            "❌ Hech qanday bot tokeni sozlanmagan. BOT_TOKEN (va kerak bo'lsa "
+            "ADMIN_BOT_TOKEN) ni .env yoki muhit o'zgaruvchilariga qo'shing."
+        )
+        return 1
 
-    # Keep server running locally
-    while True:
-        await asyncio.sleep(3600)
+    logging.info("Muhit: %s | Ishga tushgan botlar: %s", ENVIRONMENT, len(polling_tasks))
+    results = await asyncio.gather(*polling_tasks, return_exceptions=True)
+    for result in results:
+        if isinstance(result, Exception):
+            logging.error("Polling vazifasi xato bilan tugadi: %s", result)
+
+    # Barcha polling vazifalari tugadi — bu odatda token yaroqsizligini bildiradi.
+    logging.error("⚠️ Barcha botlar to'xtadi. Tokenlarni va tarmoqni tekshiring.")
+    return 1
 
 if __name__ == "__main__":
+    # Diqqat: sys.exit() ni try ichida chaqirmaymiz — u ko'targan SystemExit
+    # o'sha except tomonidan yutilib, jarayon 0 kod bilan tugab qolardi.
     try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
+        exit_code = asyncio.run(main())
+    except KeyboardInterrupt:
         logging.info("Bots stopped.")
+        exit_code = 0
+    sys.exit(exit_code or 0)

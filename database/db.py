@@ -1,6 +1,7 @@
+import asyncio
+import json
 import logging
 import os
-import asyncio
 from datetime import datetime
 from uuid import uuid4
 from typing import Dict, List, Optional, Any, Tuple
@@ -11,25 +12,48 @@ FIREBASE_PROJECT_ID = "asox-market-prod-2e4bb"
 DEFAULT_PRODUCT_IMAGE = "https://asox.uz/icons/icon-512x512.png"
 DEFAULT_CATEGORY_ICON = "🛍"
 
+def _load_firebase_credentials():
+    """Service account'ni fayldan yoki to'g'ridan-to'g'ri env o'zgaruvchisidan oladi.
+
+    Render/Railway kabi platformalarda fayl yuklash noqulay, shuning uchun
+    `FIREBASE_SERVICE_ACCOUNT_JSON` orqali JSON ni bevosita berish mumkin.
+    Ikkalasi ham bo'lmasa `None` qaytadi va ADC (Application Default
+    Credentials) bo'yicha urinib ko'riladi.
+    """
+    from firebase_admin import credentials
+
+    raw_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    if raw_json:
+        return credentials.Certificate(json.loads(raw_json)), "FIREBASE_SERVICE_ACCOUNT_JSON"
+
+    cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT", "").strip()
+    if cred_path:
+        if not os.path.exists(cred_path):
+            raise FileNotFoundError(f"FIREBASE_SERVICE_ACCOUNT fayli topilmadi: {cred_path}")
+        return credentials.Certificate(cred_path), f"fayl: {cred_path}"
+
+    return None, "Application Default Credentials"
+
+
 # Optional Firebase Firestore integration
 _db_client = None
 try:
     import firebase_admin
     from firebase_admin import credentials, firestore
     if not firebase_admin._apps:
-        cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT", "")
-        if cred_path and os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
-            firebase_admin.initialize_app(cred, {"projectId": FIREBASE_PROJECT_ID})
+        _cred, _source = _load_firebase_credentials()
+        if _cred is not None:
+            firebase_admin.initialize_app(_cred, {"projectId": FIREBASE_PROJECT_ID})
         else:
             firebase_admin.initialize_app(options={"projectId": FIREBASE_PROJECT_ID})
+        logger.info("Firebase credential manbai: %s", _source)
     _db_client = firestore.client()
     logger.info("✅ Firestore ulandi (project: %s)", FIREBASE_PROJECT_ID)
 except Exception as _e:
     _db_client = None
     logger.warning(
         "⚠️ Firestore ulanmadi (%s) — bot xotiradagi namuna ma'lumotlar bilan ishlaydi. "
-        "FIREBASE_SERVICE_ACCOUNT ni tekshiring.", _e
+        "FIREBASE_SERVICE_ACCOUNT yoki FIREBASE_SERVICE_ACCOUNT_JSON ni tekshiring.", _e
     )
 
 
@@ -189,11 +213,11 @@ def normalize_order(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 # ASOX Market Category presets
 CATEGORIES = [
-    {"id": "cat_merch", "name": "👕 Kiyimlar & Merch (Futbolka, Kepka, Panama)", "icon": "👕"},
-    {"id": "cat_poligraphy", "name": "📇 Vizitkalar & Kichik Poligrafiya", "icon": "📇"},
-    {"id": "cat_large_format", "name": "🖼️ Keng formatli bosma (Banner, Roll-up)", "icon": "🖼️"},
-    {"id": "cat_souvenirs", "name": "☕ Suvenirlar (Krujka, Stiker, Ruchka)", "icon": "☕"},
-    {"id": "cat_packaging", "name": "📦 Qadoqlash & Sumkalar", "icon": "📦"},
+    {"id": "cat_merch", "name": "Kiyimlar & Merch (Futbolka, Kepka, Panama)", "icon": "👕"},
+    {"id": "cat_poligraphy", "name": "Vizitkalar & Kichik Poligrafiya", "icon": "📇"},
+    {"id": "cat_large_format", "name": "Keng formatli bosma (Banner, Roll-up)", "icon": "🖼️"},
+    {"id": "cat_souvenirs", "name": "Suvenirlar (Krujka, Stiker, Ruchka)", "icon": "☕"},
+    {"id": "cat_packaging", "name": "Qadoqlash & Sumkalar", "icon": "📦"},
 ]
 
 SAMPLE_PRODUCTS = [
@@ -277,7 +301,7 @@ class Database:
         self._categories: List[Dict[str, Any]] = [normalize_category(c) for c in CATEGORIES]
         self._products: List[Dict[str, Any]] = [normalize_product(p) for p in SAMPLE_PRODUCTS]
         self._users: Dict[int, Dict[str, Any]] = {}
-        self._carts: Dict[int, List[Dict[str, Any]]] = {} # user_id -> [{product_id, quantity}]
+        # Firestore ulanmagan holat uchun zaxira ro'yxat (sayt buyurtmalari emas)
         self._orders: List[Dict[str, Any]] = []
         self._lock = asyncio.Lock()
 
@@ -444,11 +468,6 @@ class Database:
 
         return user
 
-    async def update_user_phone(self, user_id: int, phone: str):
-        async with self._lock:
-            if user_id in self._users:
-                self._users[user_id]["phone_number"] = phone
-
     def _sync_bot_user_ids(self) -> List[int]:
         collection = _db_client.collection("bot_users")
         try:  # faqat hujjat ID lari kerak — trafikni tejaymiz
@@ -482,120 +501,8 @@ class Database:
         return len(await self.get_broadcast_user_ids())
 
     # ------------------------------------------------------------------
-    # Savat
-    # ------------------------------------------------------------------
-    async def get_cart(self, user_id: int) -> List[Dict[str, Any]]:
-        async with self._lock:
-            items = list(self._carts.get(user_id, []))
-        # Mahsulotlarni qulf USTIDA emas, tashqarisida olamiz — Firestore
-        # so'rovi qulfni uzoq ushlab turmasligi uchun.
-        result = []
-        for item in items:
-            prod = await self.get_product_by_id(item["product_id"])
-            if prod:
-                result.append({"product": prod, "quantity": item["quantity"]})
-        return result
-
-    async def add_to_cart(self, user_id: int, product_id: str, quantity: int = 1):
-        async with self._lock:
-            if user_id not in self._carts:
-                self._carts[user_id] = []
-
-            cart = self._carts[user_id]
-            for item in cart:
-                if item["product_id"] == product_id:
-                    item["quantity"] += quantity
-                    return
-            cart.append({"product_id": product_id, "quantity": quantity})
-
-    async def update_cart_quantity(self, user_id: int, product_id: str, quantity: int):
-        async with self._lock:
-            if user_id not in self._carts:
-                return
-            cart = self._carts[user_id]
-            if quantity <= 0:
-                self._carts[user_id] = [i for i in cart if i["product_id"] != product_id]
-            else:
-                for item in cart:
-                    if item["product_id"] == product_id:
-                        item["quantity"] = quantity
-                        break
-
-    async def clear_cart(self, user_id: int):
-        async with self._lock:
-            self._carts[user_id] = []
-
-    # ------------------------------------------------------------------
     # Buyurtmalar
     # ------------------------------------------------------------------
-    def _sync_create_order(self, order_id: str, payload: Dict[str, Any]) -> None:
-        _db_client.collection("orders").document(order_id).set({
-            **payload,
-            "createdAt": firestore.SERVER_TIMESTAMP,
-        })
-
-    async def create_order(
-        self,
-        user_id: int,
-        user_name: str,
-        phone_number: str,
-        address_or_location: str,
-        payment_method: str,
-        cart_items: List[Dict[str, Any]],
-        total_amount: float
-    ) -> Dict[str, Any]:
-        async with self._lock:
-            order_id = f"ASOX-{len(self._orders) + 1001}"
-            items = [normalize_order_item(i) for i in cart_items]
-
-            # Firestore (sayt) sxemasi — camelCase maydonlar saqlanib qoladi
-            firestore_payload = {
-                "id": order_id,
-                "orderNumber": order_id,
-                "userId": f"tg_{user_id}",
-                "telegramUserId": user_id,
-                "customerName": user_name,
-                "customerPhone": phone_number,
-                "address": address_or_location,
-                "paymentMethod": payment_method,
-                "items": items,
-                "total": total_amount,
-                "totalAmount": total_amount,
-                "status": "pending",
-                "source": "telegram_bot",
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            }
-            order = normalize_order(firestore_payload)
-            self._orders.append(order)
-            self._carts[user_id] = []
-
-        if _db_client:
-            try:
-                await _in_thread(self._sync_create_order, order_id, firestore_payload)
-            except Exception as e:
-                logger.error("Buyurtma %s ni Firestore'ga yozib bo'lmadi: %s", order_id, e)
-
-        return order
-
-    def _sync_orders_by_user(self, user_id: int) -> List[Dict[str, Any]]:
-        # `where` + `order_by` birgalikda composite index talab qiladi, shuning
-        # uchun saralashni Python tomonida bajaramiz.
-        docs = _where(
-            _db_client.collection("orders"), "telegramUserId", "==", user_id
-        ).limit(ORDERS_PAGE_SIZE).stream()
-        return [normalize_order({**(d.to_dict() or {}), "id": d.id}) for d in docs]
-
-    async def get_user_orders(self, user_id: int) -> List[Dict[str, Any]]:
-        if _db_client:
-            try:
-                orders = await _in_thread(self._sync_orders_by_user, user_id)
-                if orders:
-                    orders.sort(key=lambda o: o.get("created_at") or "", reverse=True)
-                    return orders
-            except Exception as e:
-                logger.warning("Foydalanuvchi %s buyurtmalarini olishda xato: %s", user_id, e)
-        return [normalize_order(o) for o in self._orders if o.get("user_id") == user_id]
-
     def _sync_all_orders(self) -> List[Dict[str, Any]]:
         docs = (
             _db_client.collection("orders")

@@ -34,21 +34,3 @@ def get_phone_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=True
     )
-
-def get_location_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📍 Lokatsiyani yuborish", request_location=True)],
-            [KeyboardButton(text="❌ Bekor qilish")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-def get_cancel_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="❌ Bekor qilish")]
-        ],
-        resize_keyboard=True
-    )

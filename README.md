@@ -32,11 +32,32 @@ Ushbu bot **ASOX Market** e-commerce platformasi uchun yaratilgan rasmiy Telegra
 3. Telegram profil `ID` ingizni bilish uchun **[@userinfobot](https://t.me/userinfobot)** dan foydalaning.
 
 ### 2. .env faylini sozlash:
-`telegram_bot` jildidagi `.env` faylini oching va ma'lumotlarni kiriting:
+`cp .env.example .env` qiling va qiymatlarni to'ldiring:
 ```env
 BOT_TOKEN=7890123456:AAExampleTokenHere_ReplaceWithYourOwn
 ADMIN_IDS=123456789
+SHOP_LINK_SECRET=<python3 -c "import secrets; print(secrets.token_hex(32))">
+ADMIN_BOT_TOKEN=            # ixtiyoriy: alohida admin bot
+FIREBASE_SERVICE_ACCOUNT=   # ixtiyoriy: service account fayli yo'li
 ENVIRONMENT=development
+```
+
+> ⚠️ **`SHOP_LINK_SECRET` majburiy.** Do'kon ulash havolalari HMAC bilan
+> imzolanadi va bu kalit asox.uz backendidagi bilan **bir xil** bo'lishi shart.
+> Kalit bo'lmasa do'kon ulash butunlay o'chadi (fail-closed) — imzosiz havola
+> orqali begona odam do'kon bildirishnomalarini o'zlashtira olmasin.
+>
+> Sayt havolani shunday yaratadi:
+> ```js
+> const sig = crypto.createHmac('sha256', process.env.SHOP_LINK_SECRET)
+>                   .update(`shop:${shopId}`).digest('hex').slice(0, 16);
+> const link = `https://t.me/AsoxUz_Bot?start=shop_${shopId}_${sig}`;
+> ```
+
+### 2.1. Tokensiz lokal tekshirish:
+```bash
+python3 local_tester.py --check   # konfiguratsiya, katalog, buyurtmalar
+python3 tests/run_all.py          # to'liq regressiya to'plami
 ```
 
 ### 3. Kutubxonalarni o'rnatish va Ishga tushirish:
@@ -68,8 +89,17 @@ Botingiz kompyuteringiz o'chiq bo'lsa ham 24/7 uzluksiz ishlashi uchun quyidagi 
    - **Environment:** `Python 3`
    - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `python main.py`
-5. **Environment Variables** bo'limida `BOT_TOKEN` va `ADMIN_IDS` ni qo'shing.
+5. **Environment Variables** bo'limida quyidagilarni qo'shing
+   (to'liq ro'yxat `render.yaml` da):
+   - `BOT_TOKEN`, `ADMIN_IDS`, `SHOP_LINK_SECRET` — majburiy
+   - `ADMIN_BOT_TOKEN` — admin boti uchun (bo'lmasa u ishga tushmaydi)
+   - `FIREBASE_SERVICE_ACCOUNT_JSON` — service account JSON ini **to'liq matn**
+     sifatida (Render'da fayl yuklash noqulay). Bo'lmasa bot xotiradagi namuna
+     ma'lumotlar bilan ishlaydi va restartda hammasi yo'qoladi.
 6. Deploy tugmasini bosing! Botingiz 24/7 avtomatik ishlaydi.
+
+> Bot **long-polling** rejimida ishlaydi — webhook qo'llab-quvvatlanmaydi.
+> `PORT` dagi HTTP server faqat health-check uchun.
 
 ### 2. Railway.app / Koyeb / VPS (Docker orqali)
 Agar VPS (masalan Hetzner, DigitalOcean, Ubuntu server) ishlatayotgan bo'lsangiz, Docker yordamida 1 ta buyruq bilan ishga tushirishingiz mumkin:
@@ -91,15 +121,19 @@ telegram_bot/
 │   ├── start.py
 │   ├── catalog.py
 │   ├── cart.py
-│   └── admin.py
+│   ├── admin.py
+│   └── errors.py        # Global xatolik ushlagichi
 ├── keyboards/           # Tugmalar va menyular (Reply va Inline)
 │   ├── reply.py
 │   └── inline.py
-├── states/              # FSM holatlari (Checkout & Admin)
+├── states/              # FSM holatlari (Admin & arizalar)
 │   └── states.py
+├── middlewares/         # Anti-spam (throttling)
+│   └── throttling.py
 ├── utils/               # Yordamchi funksiyalar
-│   ├── formatters.py    # Narx va status formatlash
-│   └── security.py      # Do'kon havolasi HMAC imzosi
+│   ├── formatters.py    # Narx, status va HTML escaping
+│   ├── security.py      # Do'kon havolasi HMAC imzosi
+│   └── validators.py    # Matn va telefon tekshiruvi
 ├── tests/               # Regressiya testlari (python3 tests/run_all.py)
 ├── Dockerfile           # Docker konteyner fayli
 ├── docker-compose.yml   # Docker Compose sozlamalari

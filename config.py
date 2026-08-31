@@ -34,14 +34,12 @@ def is_admin_user(user_id: int, username: str = None) -> bool:
 
 
 ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "")
-ORDER_API_KEY = os.getenv("ORDER_API_KEY", "")
-MARKET_API_KEY = os.getenv("MARKET_API_KEY", "")
 
 # `/start shop_<id>_<sig>` deep-link havolalarini imzolash kaliti.
 # Xuddi shu qiymat asox.uz backendida ham bo'lishi shart.
 SHOP_LINK_SECRET = os.getenv("SHOP_LINK_SECRET", "")
 
-WEBHOOK_DOMAIN = os.getenv("WEBHOOK_DOMAIN", "").rstrip("/")
-WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
+# Health-check HTTP serveri porti (lokal test va Docker uchun).
+# Bot long-polling rejimida ishlaydi — webhook qo'llab-quvvatlanmaydi.
 PORT = int(os.getenv("PORT", 8080))
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")

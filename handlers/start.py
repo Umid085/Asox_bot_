@@ -11,7 +11,7 @@ from database.db import db
 from config import ADMIN_IDS, ADMIN_BOT_TOKEN, SHOP_LINK_SECRET, is_admin_user
 from keyboards.reply import get_main_keyboard
 from utils.security import parse_shop_payload, verify_shop_link_token
-from utils.validators import require_text
+from utils.validators import normalize_phone, require_text
 
 logger = logging.getLogger(__name__)
 
@@ -220,15 +220,21 @@ async def designer_apply_name(message: Message, state: FSMContext):
 @router.message(DesignerApplyStates.waiting_for_phone)
 async def designer_apply_phone(message: Message, state: FSMContext):
     if message.contact:
-        phone = message.contact.phone_number
+        raw_phone = message.contact.phone_number
     else:
-        phone = await require_text(
+        raw_phone = await require_text(
             message, "❌ Telefon raqamni tugma orqali yoki <code>+998901234567</code> ko'rinishida yuboring:"
         )
-        if phone is None:
+        if raw_phone is None:
             return
-    if not phone.startswith("+") and not phone.startswith("998"):
-        phone = f"+{phone}"
+
+    phone = normalize_phone(raw_phone)
+    if phone is None:
+        await message.answer(
+            "❌ Raqam noto'g'ri ko'rinadi. <code>+998901234567</code> shaklida yuboring:",
+            parse_mode="HTML",
+        )
+        return
 
     await state.update_data(phoneNumber=phone)
     await state.set_state(DesignerApplyStates.waiting_for_specialty)
@@ -346,15 +352,21 @@ async def courier_apply_name(message: Message, state: FSMContext):
 @router.message(CourierApplyStates.waiting_for_phone)
 async def courier_apply_phone(message: Message, state: FSMContext):
     if message.contact:
-        phone = message.contact.phone_number
+        raw_phone = message.contact.phone_number
     else:
-        phone = await require_text(
+        raw_phone = await require_text(
             message, "❌ Telefon raqamni tugma orqali yoki <code>+998901234567</code> ko'rinishida yuboring:"
         )
-        if phone is None:
+        if raw_phone is None:
             return
-    if not phone.startswith("+") and not phone.startswith("998"):
-        phone = f"+{phone}"
+
+    phone = normalize_phone(raw_phone)
+    if phone is None:
+        await message.answer(
+            "❌ Raqam noto'g'ri ko'rinadi. <code>+998901234567</code> shaklida yuboring:",
+            parse_mode="HTML",
+        )
+        return
 
     await state.update_data(phoneNumber=phone)
     await state.set_state(CourierApplyStates.waiting_for_city)
