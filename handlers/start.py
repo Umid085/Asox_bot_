@@ -20,7 +20,17 @@ router = Router()
 
 
 async def _notify_admins(text: str) -> None:
-    """Adminlarga admin-bot orqali xabar yuboradi. Event loop'ni bloklamaydi."""
+    """Adminlarga admin-bot orqali ZAXIRA xabar yuboradi.
+
+    Odatda ariza haqidagi bildirishnomani Cloud Functions yuboradi
+    (`onDesignerRequestCreated` / `onCourierRequestCreated`) — u Firestore
+    yozuviga ulangani uchun saytdan kelgan arizalarni ham qamrab oladi va
+    xabari kengroq (`about` / `note` maydonlari ham bor).
+
+    Bu funksiya faqat Firestore yozuvi AMALGA OSHMAGANDA chaqiriladi: unday
+    holatda CF umuman ishga tushmaydi va ariza izsiz yo'qolardi. Ilgari u har
+    safar chaqirilardi va admin bitta arizani IKKI marta olardi.
+    """
     if not ADMIN_BOT_TOKEN or not ADMIN_IDS:
         return
     url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
@@ -286,7 +296,7 @@ async def designer_apply_finish(message: Message, state: FSMContext):
     username = message.from_user.username or ""
 
     # Save to database
-    req_id = await db.add_designer_request({
+    req_id, saved = await db.add_designer_request({
         "userId": str(message.from_user.id),
         "fullName": full_name,
         "phoneNumber": phone,
@@ -305,9 +315,16 @@ async def designer_apply_finish(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-    # Adminlarga bildirishnoma
+    # Firestore'ga yozilgan bo'lsa, adminlarga xabarni Cloud Functions
+    # (`onDesignerRequestCreated`) yuboradi — bu yerdan yuborsak dublikat
+    # bo'lardi. Faqat yozuv amalga oshmaganda zaxira xabar yuboramiz.
+    if saved:
+        return
+
     tg_display = f"@{html.escape(username)}" if username else "ko'rsatilmagan"
     await _notify_admins(
+        "⚠️ <b>ZAXIRA XABAR — ariza bazaga YOZILMADI!</b>\n"
+        "<i>Uni qo'lda ko'chirib oling, admin panelda ko'rinmaydi.</i>\n\n"
         "🎨 <b>YANGI DIZAYNERLIK ARIZASI!</b>\n\n"
         f"👤 <b>F.I.Sh:</b> {html.escape(full_name)}\n"
         f"📞 <b>Telefon:</b> <code>{html.escape(phone)}</code>\n"
@@ -430,7 +447,7 @@ async def courier_apply_finish(message: Message, state: FSMContext):
     username = message.from_user.username or ""
 
     # Save to database
-    req_id = await db.add_courier_request({
+    req_id, saved = await db.add_courier_request({
         "userId": str(message.from_user.id),
         "fullName": full_name,
         "phoneNumber": phone,
@@ -449,9 +466,15 @@ async def courier_apply_finish(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-    # Adminlarga bildirishnoma
+    # Dizaynerdagi bilan bir xil sabab: CF `onCourierRequestCreated` allaqachon
+    # yuboradi, bu yer faqat zaxira.
+    if saved:
+        return
+
     tg_display = f"@{html.escape(username)}" if username else "ko'rsatilmagan"
     await _notify_admins(
+        "⚠️ <b>ZAXIRA XABAR — ariza bazaga YOZILMADI!</b>\n"
+        "<i>Uni qo'lda ko'chirib oling, admin panelda ko'rinmaydi.</i>\n\n"
         "🛵 <b>YANGI KURYERLIK ARIZASI!</b>\n\n"
         f"👤 <b>F.I.Sh:</b> {html.escape(full_name)}\n"
         f"📞 <b>Telefon:</b> <code>{html.escape(phone)}</code>\n"

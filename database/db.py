@@ -713,23 +713,49 @@ class Database:
             "createdAt": firestore.SERVER_TIMESTAMP
         })
 
-    async def add_designer_request(self, data: dict[str, Any]) -> str:
-        req_id = f"des_{int(datetime.now().timestamp())}_{uuid4().hex[:6]}"
-        if _db_client:
-            try:
-                await _in_thread(self._sync_add_request, "designer_requests", req_id, data)
-            except Exception as e:
-                logger.error("Dizayner arizasini yaratishda xato: %s", e)
-        return req_id
+    async def add_designer_request(self, data: dict[str, Any]) -> tuple[str, bool]:
+        """`(req_id, firestore_ga_yozildi)` qaytaradi.
 
-    async def add_courier_request(self, data: dict[str, Any]) -> str:
+        Ikkinchi qiymat MUHIM: yozuv muvaffaqiyatli bo'lsa Cloud Functions
+        (`onDesignerRequestCreated`) adminlarga xabar yuboradi va bot
+        qo'shimcha xabar yubormasligi kerak — aks holda admin bitta arizani
+        IKKI marta oladi. Yozilmagan bo'lsa esa CF umuman ishga tushmaydi va
+        ariza izsiz yo'qoladi, shuning uchun bot zaxira xabar yuboradi.
+        """
+        req_id = f"des_{int(datetime.now().timestamp())}_{uuid4().hex[:6]}"
+        if not _db_client:
+            logger.warning(
+                "Dizayner arizasi %s Firestore'ga yozilmadi: ulanish yo'q", req_id
+            )
+            return req_id, False
+        try:
+            await _in_thread(self._sync_add_request, "designer_requests", req_id, data)
+            return req_id, True
+        except Exception as e:
+            logger.error("Dizayner arizasini yaratishda xato: %s", e)
+            return req_id, False
+
+    async def add_courier_request(self, data: dict[str, Any]) -> tuple[str, bool]:
+        """`(req_id, firestore_ga_yozildi)` qaytaradi.
+
+        Ikkinchi qiymat MUHIM: yozuv muvaffaqiyatli bo'lsa Cloud Functions
+        (`onCourierRequestCreated`) adminlarga xabar yuboradi va bot
+        qo'shimcha xabar yubormasligi kerak — aks holda admin bitta arizani
+        IKKI marta oladi. Yozilmagan bo'lsa esa CF umuman ishga tushmaydi va
+        ariza izsiz yo'qoladi, shuning uchun bot zaxira xabar yuboradi.
+        """
         req_id = f"cou_{int(datetime.now().timestamp())}_{uuid4().hex[:6]}"
-        if _db_client:
-            try:
-                await _in_thread(self._sync_add_request, "courier_requests", req_id, data)
-            except Exception as e:
-                logger.error("Kuryer arizasini yaratishda xato: %s", e)
-        return req_id
+        if not _db_client:
+            logger.warning(
+                "Kuryer arizasi %s Firestore'ga yozilmadi: ulanish yo'q", req_id
+            )
+            return req_id, False
+        try:
+            await _in_thread(self._sync_add_request, "courier_requests", req_id, data)
+            return req_id, True
+        except Exception as e:
+            logger.error("Kuryer arizasini yaratishda xato: %s", e)
+            return req_id, False
 
 
 # Global database instance

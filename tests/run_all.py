@@ -5,6 +5,7 @@ import sys
 # _harness sys.path ga repo ildizini qo'shadi — test modullaridan OLDIN
 # import qilinishi shart (nojo'ya ta'sir uchun).
 import _harness  # noqa: F401
+import test_admin_notifications
 import test_firestore_layer
 import test_middleware
 import test_normalization
@@ -15,6 +16,7 @@ SUITES = [
     ("Firestore qatlami", test_firestore_layer),
     ("Render, kirish tekshiruvi, xatoliklar", test_rendering),
     ("Throttling va telefon", test_middleware),
+    ("Admin bildirishnomalari", test_admin_notifications),
 ]
 
 def main() -> int:
