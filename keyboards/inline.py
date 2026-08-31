@@ -11,7 +11,8 @@ def get_categories_keyboard(categories: List[Dict[str, Any]]) -> InlineKeyboardM
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_products_keyboard(products: List[Dict[str, Any]], cat_id: str) -> InlineKeyboardMarkup:
+def get_products_keyboard(products: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    """Mahsulotlar ro'yxati. Ortga tugmasi doim kategoriyalar menyusiga qaytaradi."""
     buttons = []
     for p in products:
         price_str = format_price(p.get('price', 0))

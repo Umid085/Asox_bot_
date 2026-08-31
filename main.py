@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN, ADMIN_BOT_TOKEN, WEBHOOK_DOMAIN, WEBHOOK_PATH, PORT, ENVIRONMENT
-from handlers import start, catalog, cart, admin
+from handlers import start, catalog, cart, admin, errors
 
 # Setup logging
 logging.basicConfig(
@@ -77,6 +77,7 @@ async def main():
         dp_user.include_router(start.router)
         dp_user.include_router(catalog.router)
         dp_user.include_router(cart.router)
+        errors.setup_errors(dp_user)
         polling_tasks.append(safe_start_polling(bot_user, dp_user, "ASOX Market User Bot (@AsoxUz_Bot)"))
 
     # 3. Dedicated Admin Bot (@asox_admin_bot)
@@ -84,6 +85,7 @@ async def main():
         bot_admin = Bot(token=ADMIN_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         dp_admin = Dispatcher()
         dp_admin.include_router(admin.router)
+        errors.setup_errors(dp_admin)
         polling_tasks.append(safe_start_polling(bot_admin, dp_admin, "ASOX Market Admin Bot (@asox_admin_bot)"))
 
     if polling_tasks:

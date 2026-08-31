@@ -63,7 +63,7 @@ async def main():
     check("image_url <- images[0]", fp["image_url"] == "https://asox.uz/p/1.jpg")
     try:
         get_categories_keyboard([normalize_category({"name": "Kiyimlar", "isActive": True}, "c1")])
-        get_products_keyboard([fp], "c1")
+        get_products_keyboard([fp])
         check("icon'siz kategoriya klaviaturasi qurildi", True)
     except Exception as e:
         check(f"icon'siz kategoriya klaviaturasi ({e})", False)

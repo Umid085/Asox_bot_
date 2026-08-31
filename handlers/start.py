@@ -11,6 +11,7 @@ from database.db import db
 from config import ADMIN_IDS, ADMIN_BOT_TOKEN, SHOP_LINK_SECRET, is_admin_user
 from keyboards.reply import get_main_keyboard
 from utils.security import parse_shop_payload, verify_shop_link_token
+from utils.validators import require_text
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +205,9 @@ async def designer_apply_start(message: Message, state: FSMContext):
 
 @router.message(DesignerApplyStates.waiting_for_name)
 async def designer_apply_name(message: Message, state: FSMContext):
-    name = message.text.strip()
+    name = await require_text(message, "❌ Iltimos, ism va familiyangizni <b>matn</b> ko'rinishida yuboring:")
+    if name is None:
+        return  # holat saqlanadi — foydalanuvchi shu bosqichda qayta urinadi
     await state.update_data(fullName=name)
     await state.set_state(DesignerApplyStates.waiting_for_phone)
     await message.answer(
@@ -219,7 +222,11 @@ async def designer_apply_phone(message: Message, state: FSMContext):
     if message.contact:
         phone = message.contact.phone_number
     else:
-        phone = message.text.strip()
+        phone = await require_text(
+            message, "❌ Telefon raqamni tugma orqali yoki <code>+998901234567</code> ko'rinishida yuboring:"
+        )
+        if phone is None:
+            return
     if not phone.startswith("+") and not phone.startswith("998"):
         phone = f"+{phone}"
 
@@ -247,7 +254,9 @@ async def designer_apply_specialty(message: Message, state: FSMContext):
         await message.answer("Ariza bekor qilindi.", reply_markup=get_main_keyboard())
         return
 
-    specialty = message.text.strip()
+    specialty = await require_text(message, "❌ Yo'nalishni tugmalardan tanlang yoki <b>matn</b> yozing:")
+    if specialty is None:
+        return
     await state.update_data(specialty=specialty)
     await state.set_state(DesignerApplyStates.waiting_for_portfolio)
     await message.answer(
@@ -259,7 +268,11 @@ async def designer_apply_specialty(message: Message, state: FSMContext):
 
 @router.message(DesignerApplyStates.waiting_for_portfolio)
 async def designer_apply_finish(message: Message, state: FSMContext):
-    portfolio = message.text.strip()
+    portfolio = await require_text(
+        message, "❌ Portfolio havolasini yoki tajribangizni <b>matn</b> ko'rinishida yuboring:"
+    )
+    if portfolio is None:
+        return
     data = await state.get_data()
     await state.clear()
 
@@ -318,7 +331,9 @@ async def courier_apply_start(message: Message, state: FSMContext):
 
 @router.message(CourierApplyStates.waiting_for_name)
 async def courier_apply_name(message: Message, state: FSMContext):
-    name = message.text.strip()
+    name = await require_text(message, "❌ Iltimos, ism va familiyangizni <b>matn</b> ko'rinishida yuboring:")
+    if name is None:
+        return  # holat saqlanadi — foydalanuvchi shu bosqichda qayta urinadi
     await state.update_data(fullName=name)
     await state.set_state(CourierApplyStates.waiting_for_phone)
     await message.answer(
@@ -333,7 +348,11 @@ async def courier_apply_phone(message: Message, state: FSMContext):
     if message.contact:
         phone = message.contact.phone_number
     else:
-        phone = message.text.strip()
+        phone = await require_text(
+            message, "❌ Telefon raqamni tugma orqali yoki <code>+998901234567</code> ko'rinishida yuboring:"
+        )
+        if phone is None:
+            return
     if not phone.startswith("+") and not phone.startswith("998"):
         phone = f"+{phone}"
 
@@ -361,7 +380,10 @@ async def courier_apply_city(message: Message, state: FSMContext):
         await message.answer("Ariza bekor qilindi.", reply_markup=get_main_keyboard())
         return
 
-    city = message.text.replace("📍", "").strip()
+    city_raw = await require_text(message, "❌ Hududni tugmalardan tanlang yoki <b>matn</b> yozing:")
+    if city_raw is None:
+        return
+    city = city_raw.replace("📍", "").strip()
     await state.update_data(city=city)
     await state.set_state(CourierApplyStates.waiting_for_vehicle)
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -386,7 +408,9 @@ async def courier_apply_finish(message: Message, state: FSMContext):
         await message.answer("Ariza bekor qilindi.", reply_markup=get_main_keyboard())
         return
 
-    vehicle = message.text.strip()
+    vehicle = await require_text(message, "❌ Transport turini tugmalardan tanlang yoki <b>matn</b> yozing:")
+    if vehicle is None:
+        return
     data = await state.get_data()
     await state.clear()
 

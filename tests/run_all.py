@@ -6,10 +6,12 @@ from _harness import Results  # sys.path ni sozlaydi
 
 import test_firestore_layer
 import test_normalization
+import test_rendering
 
 SUITES = [
     ("Normalizatsiya va xavfsizlik", test_normalization),
     ("Firestore qatlami", test_firestore_layer),
+    ("Render, kirish tekshiruvi, xatoliklar", test_rendering),
 ]
 
 def main() -> int:
