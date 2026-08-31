@@ -144,6 +144,28 @@ async def main():
           fake.data["couriers"]["555"]["activeOrderId"] is None)
     check("hisob oshdi", fake.data["couriers"]["555"]["completedCount"] == 1)
 
+    print("\n[5] Qabul qilingan zakas matni")
+    from handlers.courier import build_accepted_text, build_taken_text
+
+    accepted = build_accepted_text({
+        "orderNumber": "1042", "courierName": "Otabek",
+        "customerName": "Ali Valiyev", "customerPhone": "+998901112233",
+        "address": "Gagarin 45", "distanceKm": 5.2, "courierFee": 24600,
+        "location": {"latitude": 39.69, "longitude": 66.96},
+    })
+    check("zakas raqami bor", "1042" in accepted)
+    check("mijoz ismi KO'RINADI", "Ali Valiyev" in accepted)
+    check("telefon ko'rinadi", "+998901112233" in accepted)
+    check("xarita havolasi bor", "google.com/maps" in accepted)
+    check("masofa va haq bor", "5.2" in accepted and "24 600" in accepted)
+
+    no_geo = build_accepted_text({"orderNumber": "7", "address": "Chilonzor"})
+    check("koordinatasiz ham qulamaydi", "7" in no_geo)
+    check("koordinatasiz xarita havolasi yo'q", "google.com/maps" not in no_geo)
+
+    taken = build_taken_text("1042", "Otabek")
+    check("yutqazganga g'olib ismi ko'rinadi", "Otabek" in taken and "1042" in taken)
+
     return _r.summary("Natija")
 
 
