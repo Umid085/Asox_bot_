@@ -860,6 +860,118 @@ class Database:
             logger.error("Kuryer %s ni olishda xato: %s", chat_id, e)
             return None
 
+    def _sync_redeem_courier_invite(
+        self, token: str, chat_id: str, username: str | None
+    ) -> dict[str, Any]:
+        """`courier_invites/{token}` ni kuryerga aylantiradi.
+
+        Taklifni do'kon admin paneli yaratadi (`functions/shop_couriers.js`) —
+        do'kon ism va telefonni biladi, lekin Telegram `chat_id` sini BILMAYDI:
+        bot odamga @username orqali yoza olmaydi, chat faqat odam Start
+        bosgandan keyin paydo bo'ladi. Shu bo'shliqni aynan mana shu funksiya
+        yopadi.
+
+        Tartib MUHIM: avval `couriers` hujjati, keyin ko'zgu, eng oxirida
+        taklif yopiladi. Teskarisi bo'lsa taklif "ishlatilgan" ko'rinib,
+        kuryer esa hech qachon zakas olmasdi (`approve_courier_request` dagi
+        bilan bir xil mulohaza).
+        """
+        invite_ref = _db_client.collection("courier_invites").document(token)
+        snap = invite_ref.get()
+        if not snap.exists:
+            return {"error": "not_found"}
+
+        invite = snap.to_dict() or {}
+        if invite.get("usedAt"):
+            return {"error": "used"}
+
+        expires_at = invite.get("expiresAt")
+        if expires_at is not None:
+            try:
+                now = datetime.now(expires_at.tzinfo)
+                if expires_at < now:
+                    return {"error": "expired"}
+            except (AttributeError, TypeError):
+                # Buzilgan sana — taklifni rad etamiz (fail-closed).
+                logger.error("Taklif %s da expiresAt buzilgan: %r", token, expires_at)
+                return {"error": "expired"}
+
+        shop_id = str(invite.get("shopId") or "").strip()
+        if not shop_id:
+            logger.error("Taklif %s da shopId yo'q", token)
+            return {"error": "not_found"}
+
+        # 1) Kanonik kuryer hujjati. `source: 'shop'` — do'kon havolasi orqali
+        # kelgan kuryer; usiz do'kon uni o'chirganda `shopIds` bo'shab qolardi
+        # va u umumiy havzaga tushib BARCHA do'konlarning zaxira zakaslarini
+        # ola boshlardi (`courier_dispatch.js:selectCouriers`).
+        #
+        # MAVJUD kuryerga `source` YOZILMAYDI: markaziy admin tasdiqlagan
+        # platforma kuryeri do'kon havolasini ochsa (telefoni boshqacha
+        # yozilgani uchun panel uni topa olmagan bo'lishi mumkin), uni
+        # do'konga qulflab qo'yish — huquqni pasaytirish bo'lardi.
+        courier_data = {
+            "fullName": invite.get("fullName") or "Kuryer",
+            "phoneNumber": invite.get("phoneNumber") or "",
+            "phoneE164": invite.get("phoneE164") or "",
+            "telegramChatId": chat_id,
+            "telegramUsername": username or "",
+            # `vehicle` — admin botidagi kuryerlar ro'yxati shu maydonni
+            # chiqaradi; `vehicleType` — Flutter modeli o'qiydigan kod.
+            "vehicle": invite.get("vehicleType") or "",
+            "vehicleType": invite.get("vehicleType") or "",
+            "city": invite.get("city") or "",
+            "shopIds": firestore.ArrayUnion([shop_id]),
+        }
+        if not _db_client.collection("couriers").document(chat_id).get().exists:
+            courier_data["source"] = "shop"
+        self._sync_create_courier(chat_id, courier_data)
+
+        # 2) Do'kon paneli ko'zgusi.
+        mirror_id = str(invite.get("mirrorDocId") or "").strip()
+        if mirror_id:
+            (
+                _db_client.collection("shops")
+                .document(shop_id)
+                .collection("couriers")
+                .document(mirror_id)
+                .set(
+                    {
+                        "courierId": chat_id,
+                        "status": "active",
+                        "telegramUsername": username or "",
+                        "joinedAt": firestore.SERVER_TIMESTAMP,
+                    },
+                    merge=True,
+                )
+            )
+
+        # 3) Taklif bir martalik.
+        invite_ref.set(
+            {"usedAt": firestore.SERVER_TIMESTAMP, "usedBy": chat_id}, merge=True
+        )
+
+        return {
+            "shopId": shop_id,
+            "shopName": invite.get("shopName") or "",
+            "fullName": invite.get("fullName") or "",
+        }
+
+    async def redeem_courier_invite(
+        self, token: str, chat_id: str | int, username: str | None = None
+    ) -> dict[str, Any]:
+        """`/start cour_<token>` uchun. Xato bo'lsa `{'error': ...}` qaytaradi."""
+        if not _db_client:
+            logger.warning("Taklif %s qabul qilinmadi: Firestore yo'q", token)
+            return {"error": "unavailable"}
+        try:
+            return await _in_thread(
+                self._sync_redeem_courier_invite, token, str(chat_id), username
+            )
+        except Exception as e:
+            logger.error("Taklif %s ni qabul qilishda xato: %s", token, e)
+            return {"error": "unavailable"}
+
 
 
     def _run_in_transaction(self, body):

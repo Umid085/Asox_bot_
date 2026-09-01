@@ -7,6 +7,7 @@ import sys
 import _harness  # noqa: F401
 import test_admin_notifications
 import test_courier
+import test_courier_invite
 import test_firestore_layer
 import test_middleware
 import test_normalization
@@ -19,6 +20,7 @@ SUITES = [
     ("Throttling va telefon", test_middleware),
     ("Admin bildirishnomalari", test_admin_notifications),
     ("Kuryer dispetcheri", test_courier),
+    ("Kuryer taklifi (do'kon paneli)", test_courier_invite),
 ]
 
 def main() -> int:

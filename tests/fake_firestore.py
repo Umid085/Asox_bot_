@@ -32,6 +32,10 @@ class _DocRef:
         if self.id not in self._store.data[self._coll]:
             raise KeyError("NotFound")
         self._store.data[self._coll][self.id].update(payload)
+    def collection(self, name):
+        # Subkolleksiya (`shops/{id}/couriers`) — to'liq yo'l kalit sifatida
+        # ishlatiladi, ya'ni test seed'ida "shops/s1/couriers" deb yoziladi.
+        return _Query(self._store, f"{self._coll}/{self.id}/{name}")
 
 class _Query:
     def __init__(self, store, coll, preds=None, limit=None, order=None, desc=False):
