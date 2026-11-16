@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">ASOX Market</string>
+    <string name="nav_catalog">Katalog</string>
+    <string name="nav_cart">Savat</string>
+    <string name="nav_apply">Arizalar</string>
+    <string name="nav_profile">Profil</string>
+    <string name="nav_admin">Admin</string>
+    <string name="catalog_hero_title">ASOX Market</string>
+    <string name="catalog_hero_subtitle">Maxsus bosma, merch va poligrafiya mahsulotlari</string>
+    <string name="search_placeholder">Mahsulot nomi yoki tavsifidan qidirish…</string>
+    <string name="all_categories">Barchasi</string>
+    <string name="open_website_cta">asox.uz saytida ko\'rish</string>
+    <string name="buy_on_website_cta">Saytda xarid qilish</string>
+    <string name="cart_redirect_title">ASOX Market Xaridlar Bo\'limi</string>
+    <string name="cart_redirect_desc">Mahsulotlarni xavfsiz xarid qilish, to\'lovlarni amalga oshirish va buyurtma berish rasmiy asox.uz saytimiz orqali amalga oshiriladi.</string>
+    <string name="support_phone">+998 (77) 048-37-63</string>
+    <string name="support_telegram">@asox_support</string>
+    <string name="support_website">https://asox.uz</string>
+    <string name="support_address">Oʻzbekiston, Samarqand shahri, Sadaf MFY, Gagarin ko\'chasi, 60</string>
+    <string name="error_no_browser">Havolani ochish uchun brauzer topilmadi.</string>
+</resources>

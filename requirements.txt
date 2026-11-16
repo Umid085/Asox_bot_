@@ -1,7 +1,0 @@
-# Yuqori chegara bilan pinlangan: minor yangilanishlar keladi, lekin
-# major versiya o'zgarishi (buzuvchi) avtomatik o'rnatilmaydi.
-aiogram~=3.31
-python-dotenv~=1.2
-pydantic~=2.12
-aiohttp~=3.14
-firebase-admin~=7.5

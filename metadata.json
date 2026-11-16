@@ -1,0 +1,8 @@
+{
+  "name": "ASOX Market",
+  "description": "ASOX Market custom print, merch, and poligraphy marketplace app with product catalog, designer and courier applications, HMAC-verified shop linking, and admin management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
